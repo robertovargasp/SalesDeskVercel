@@ -1,0 +1,102 @@
+
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Catálogo de productos",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "price": { "type": "number" },
+        "defaultCommission": { "type": "number" }
+      },
+      "required": ["id", "name", "price", "defaultCommission"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Perfiles de usuarios con roles y configuración",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "username": { "type": "string" },
+        "phone": { "type": "string" },
+        "city": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "seller"] },
+        "isActive": { "type": "boolean" },
+        "settlementFrequency": { "type": "string", "enum": ["weekly", "biweekly"] },
+        "settlementStartDay": { "type": "number" }
+      },
+      "required": ["id", "name", "username", "city", "role", "isActive"]
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "description": "Stock actual por vendedor",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productId": { "type": "string" },
+        "sellerId": { "type": "string" },
+        "quantity": { "type": "number" }
+      },
+      "required": ["id", "productId", "sellerId", "quantity"]
+    },
+    "Sale": {
+      "title": "Sale",
+      "description": "Registro de transacciones de venta",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sellerId": { "type": "string" },
+        "totalVenta": { "type": "number" },
+        "totalComision": { "type": "number" },
+        "totalDeposito": { "type": "number" },
+        "status": { "type": "string", "enum": ["assigned", "en_route", "delivered", "paid"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "sellerId", "totalVenta", "totalComision", "totalDeposito", "status", "createdAt"]
+    },
+    "WeeklySettlement": {
+      "title": "WeeklySettlement",
+      "description": "Reportes de liquidación semanal",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sellerId": { "type": "string" },
+        "totalDeposito": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "reported", "confirmed"] }
+      },
+      "required": ["id", "sellerId", "totalDeposito", "status"]
+    }
+  },
+  "auth": {
+    "providers": ["password"]
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Catálogo global de productos"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Perfiles y roles de usuario"
+    },
+    "/inventory/{inventoryId}": {
+      "schema": { "$ref": "#/entities/InventoryItem" },
+      "description": "Stock real en manos de vendedores"
+    },
+    "/sales/{saleId}": {
+      "schema": { "$ref": "#/entities/Sale" },
+      "description": "Cabeceras de venta y eventos"
+    },
+    "/settlements/{settlementId}": {
+      "schema": { "$ref": "#/entities/WeeklySettlement" },
+      "description": "Liquidaciones de dinero"
+    },
+    "/assignments/{assignmentId}": {
+      "schema": { "$ref": "#/entities/InventoryAssignment" },
+      "description": "Historial de movimientos de stock"
+    }
+  }
+}

@@ -1,0 +1,829 @@
+
+"use client"
+
+import { useState, useMemo } from 'react';
+import { useStore } from '@/hooks/use-store';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Calendar } from '@/components/ui/calendar';
+import { format } from 'date-fns';
+import { es } from 'date-fns/locale';
+import { 
+  CheckCircle2, 
+  Truck, 
+  Phone, 
+  MapPin, 
+  User, 
+  DollarSign, 
+  Package, 
+  ShoppingCart, 
+  ArrowLeft,
+  ChevronRight,
+  Clock,
+  ExternalLink,
+  Copy,
+  Handshake,
+  XCircle,
+  Wallet,
+  Camera,
+  Maximize2,
+  CalendarDays,
+  MessageSquare
+} from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { cn } from '@/lib/utils';
+import { toast } from '@/hooks/use-toast';
+import { SaleStatus } from '@/lib/types';
+
+const STEPS = [
+  { id: 'accepted', label: 'Confirmar', icon: Handshake },
+  { id: 'contacting', label: 'Contacto', icon: Phone },
+  { id: 'scheduled', label: 'Agendado', icon: CalendarDays },
+  { id: 'in_transit', label: 'En camino', icon: Truck },
+  { id: 'delivered', label: 'Entregado', icon: Package },
+];
+
+export default function SellerSalesPage() {
+  const { currentUser, users, sales, products, updateSaleStatus, assignDeliveryPerson } = useStore();
+  const deliveryPersons = users.filter(u => u.role === 'delivery');
+  const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
+  const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
+  const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false);
+  const [isAssignDeliveryOpen, setIsAssignDeliveryOpen] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+  const [scheduleData, setScheduleData] = useState({ date: '', time: '' });
+  const [rejectionNote, setRejectionNote] = useState('');
+
+  const mySales = sales.filter(s => s.sellerId === currentUser?.id);
+  const selectedSale = mySales.find(s => s.id === selectedSaleId);
+
+  // Resumen por ciudad — agrupa las ventas activas (excluye canceladas/fallidas)
+  const citySummary = useMemo(() => {
+    const active = mySales.filter(s => !['cancelled', 'delivery_failed'].includes(s.status));
+    const map: Record<string, number> = {};
+    active.forEach(s => {
+      const city = s.city?.trim() || 'Sin ciudad';
+      map[city] = (map[city] || 0) + 1;
+    });
+    return {
+      rows: Object.entries(map).sort(([, a], [, b]) => b - a),
+      total: active.length,
+    };
+  }, [mySales]);
+
+  const getStepProgress = (status: SaleStatus) => {
+    switch (status) {
+      case 'assigned': return 0;
+      case 'accepted': return 20;
+      case 'contacting': return 40;
+      case 'scheduled': return 60;
+      case 'in_transit': return 80;
+      case 'delivered':
+      case 'delivery_confirmed':
+      case 'paid': return 100;
+      default: return 0;
+    }
+  };
+
+  const getStatusLabel = (status: SaleStatus) => {
+    switch (status) {
+      case 'assigned': return 'Por Confirmar';
+      case 'accepted': return 'Confirmada';
+      case 'contacting': return 'En Contacto';
+      case 'scheduled': return 'Agendado';
+      case 'in_transit': return 'En camino';
+      case 'delivered': return 'Entregado';
+      case 'delivery_confirmed': return 'Confirmado Admin';
+      case 'paid': return 'Liquidado';
+      case 'cancelled': return 'Cancelado';
+      default: return status;
+    }
+  };
+
+  const handleUpdateStatus = (status: SaleStatus) => {
+    if (!selectedSale) return;
+    if (status === 'scheduled') {
+      setIsScheduleDialogOpen(true);
+      return;
+    }
+    updateSaleStatus(selectedSale.id, status);
+  };
+
+  const confirmSchedule = () => {
+    if (!selectedSale || !selectedDate) {
+      toast({ variant: "destructive", title: "Fecha requerida", description: "Debes seleccionar el día del acuerdo." });
+      return;
+    }
+    
+    const dateStr = format(selectedDate, "EEEE d 'de' MMMM", { locale: es });
+    const formattedDate = dateStr.charAt(0).toUpperCase() + dateStr.slice(1);
+
+    updateSaleStatus(selectedSale.id, 'scheduled', { 
+      deliveryDate: formattedDate, 
+      deliveryTime: scheduleData.time,
+      note: `Entrega pactada para el ${formattedDate} ${scheduleData.time}`
+    });
+    
+    setIsScheduleDialogOpen(false);
+    setSelectedDate(undefined);
+    setScheduleData({ date: '', time: '' });
+  };
+
+  const confirmRejection = () => {
+    if (!selectedSale || !rejectionNote.trim()) {
+      toast({ variant: "destructive", title: "Nota requerida", description: "Por favor indica el motivo del rechazo." });
+      return;
+    }
+
+    updateSaleStatus(selectedSale.id, 'cancelled', { note: rejectionNote });
+    setIsRejectDialogOpen(false);
+    setRejectionNote('');
+    toast({ title: "Venta Rechazada", description: "Se ha notificado al administrador y devuelto el stock." });
+  };
+
+  const copyToClipboard = (text: string) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    toast({ title: "Copiado", description: "Información copiada al portapapeles." });
+  };
+
+  if (selectedSale) {
+    const progress = getStepProgress(selectedSale.status);
+    const currentStatusIdx = STEPS.findIndex(s => {
+      if (selectedSale.status === 'paid') return STEPS.length - 1;
+      return s.id === selectedSale.status;
+    });
+
+    const isPendingConfirmation = selectedSale.status === 'assigned';
+    const canReject = !['delivered', 'paid', 'cancelled'].includes(selectedSale.status);
+
+    return (
+      <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
+        <div className="flex items-center gap-4">
+          <Button variant="outline" size="icon" onClick={() => setSelectedSaleId(null)} className="rounded-full h-10 w-10">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-black">Venta #{selectedSale.id.toUpperCase()}</h1>
+              <Badge variant="secondary" className={cn(
+                "border-none font-bold",
+                selectedSale.status === 'cancelled' ? "bg-red-100 text-red-700" : "bg-primary/10 text-primary"
+              )}>
+                {getStatusLabel(selectedSale.status)}
+              </Badge>
+            </div>
+            <p className="text-muted-foreground text-sm font-medium">
+              {new Date(selectedSale.createdAt).toLocaleDateString('es-ES', { 
+                weekday: 'long', 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+              })}
+            </p>
+          </div>
+        </div>
+
+        {isPendingConfirmation && (
+          <Card className="border-none shadow-2xl bg-primary text-primary-foreground rounded-3xl overflow-hidden animate-in zoom-in-95 duration-500">
+            <CardContent className="p-8">
+              <div className="flex flex-col md:flex-row items-center justify-between gap-8">
+                <div className="flex items-center gap-6">
+                  <div className="bg-white/20 p-4 rounded-2xl">
+                    <Handshake className="w-10 h-10" />
+                  </div>
+                  <div className="space-y-1">
+                    <h2 className="text-2xl font-black">¿Deseas realizar esta venta?</h2>
+                    <p className="text-primary-foreground/70 text-sm">Confirma para empezar el proceso de contacto y entrega.</p>
+                  </div>
+                </div>
+                <div className="flex gap-4 w-full md:w-auto">
+                  <Button 
+                    className="flex-1 md:flex-none h-14 px-10 bg-white text-primary hover:bg-white/90 font-black rounded-2xl shadow-xl"
+                    onClick={() => updateSaleStatus(selectedSale.id, 'accepted')}
+                  >
+                    ACEPTAR VENTA
+                  </Button>
+                  <Dialog open={isRejectDialogOpen} onOpenChange={setIsRejectDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button 
+                        variant="ghost" 
+                        className="flex-1 md:flex-none h-14 px-10 text-white hover:bg-white/10 font-bold border-2 border-white/20 rounded-2xl"
+                      >
+                        RECHAZAR
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Rechazar Asignación</DialogTitle>
+                        <DialogDescription>Indica brevemente por qué no puedes tomar esta venta.</DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                          <Label className="text-xs font-bold uppercase">Motivo del Rechazo</Label>
+                          <Input 
+                            placeholder="Ej: Fuera de mi zona, cliente no contesta..." 
+                            value={rejectionNote}
+                            onChange={e => setRejectionNote(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button variant="destructive" className="w-full h-12" onClick={confirmRejection}>Confirmar Rechazo</Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+          <div className="lg:col-span-2 space-y-6">
+            <Card className="border-none shadow-sm rounded-2xl overflow-hidden">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-bold text-muted-foreground">Seguimiento del pedido</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-12 py-6">
+                <div className="relative px-4">
+                  <div className="absolute top-1/2 left-0 w-full h-0.5 bg-muted -translate-y-1/2 z-0" />
+                  <div className="flex justify-between relative z-10">
+                    {STEPS.map((step, idx) => {
+                      const Icon = step.icon;
+                      const isPast = idx <= currentStatusIdx || selectedSale.status === 'paid';
+                      const isCurrent = idx === currentStatusIdx && selectedSale.status !== 'paid';
+
+                      return (
+                        <div key={step.id} className="flex flex-col items-center gap-2 group">
+                          <div className={cn(
+                            "w-12 h-12 rounded-full flex items-center justify-center border-4 transition-all duration-500",
+                            isPast ? "bg-primary border-primary text-primary-foreground shadow-lg" : "bg-white border-muted text-muted-foreground"
+                          )}>
+                            <Icon className="w-5 h-5" />
+                          </div>
+                          <span className={cn(
+                            "text-[10px] font-bold uppercase tracking-tight",
+                            isPast ? "text-primary" : "text-muted-foreground"
+                          )}>{step.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-6 px-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold text-muted-foreground">Situación actual</span>
+                    <Badge variant="secondary" className="bg-primary/10 text-primary border-none px-3">
+                      {getStatusLabel(selectedSale.status)}
+                    </Badge>
+                  </div>
+                  <div className="relative h-2 bg-muted rounded-full overflow-visible">
+                    <div 
+                      className="absolute top-0 left-0 h-full bg-primary rounded-full transition-all duration-1000 ease-out"
+                      style={{ width: `${progress}%` }}
+                    />
+                    <div 
+                      className="absolute top-1/2 -translate-y-1/2 bg-primary w-8 h-8 rounded-xl shadow-lg flex items-center justify-center text-primary-foreground transition-all duration-1000 ease-out"
+                      style={{ left: `calc(${progress}% - 16px)` }}
+                    >
+                      <Package className="w-4 h-4" />
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {!isPendingConfirmation && canReject && (
+              <Card className="border-none shadow-sm rounded-2xl">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-bold text-muted-foreground">Actualizar estado</CardTitle>
+                </CardHeader>
+                <CardContent className="flex flex-wrap gap-3">
+                  {STEPS.map((step) => {
+                    const isCompleted = STEPS.findIndex(s => s.id === step.id) <= currentStatusIdx;
+                    return (
+                      <Button
+                        key={step.id}
+                        variant={selectedSale.status === step.id ? "secondary" : "outline"}
+                        className={cn(
+                          "h-12 px-6 font-bold rounded-xl transition-all",
+                          selectedSale.status === step.id ? "bg-primary/10 text-primary hover:bg-primary/20 border-none" : 
+                          isCompleted ? "opacity-50" : "hover:bg-primary/5"
+                        )}
+                        onClick={() => handleUpdateStatus(step.id as SaleStatus)}
+                        disabled={isCompleted || step.id === 'accepted'}
+                      >
+                        {selectedSale.status === step.id && <CheckCircle2 className="w-4 h-4 mr-2" />}
+                        {step.label}
+                      </Button>
+                    );
+                  })}
+                  
+                  <Dialog open={isRejectDialogOpen} onOpenChange={setIsRejectDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button 
+                        variant="outline" 
+                        className="h-12 px-6 font-bold rounded-xl border-destructive text-destructive hover:bg-destructive/10"
+                      >
+                        <XCircle className="w-4 h-4 mr-2" /> Rechazar
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Cancelar Venta</DialogTitle>
+                        <DialogDescription>Explica brevemente por qué no se pudo concretar la entrega.</DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                          <Label className="text-xs font-bold uppercase">Notas de Cancelación</Label>
+                          <Input 
+                            placeholder="Ej: Cliente canceló, no hubo acuerdo de horario..." 
+                            value={rejectionNote}
+                            onChange={e => setRejectionNote(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button variant="destructive" className="w-full h-12" onClick={confirmRejection}>Confirmar Cancelación</Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                </CardContent>
+              </Card>
+            )}
+
+            <Card className="border-none shadow-sm rounded-2xl">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-bold text-muted-foreground">Productos vendidos</CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/30">
+                      <TableHead className="text-[10px] font-black uppercase pl-6">Producto</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase text-center">Cant.</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase text-center">P. Unit.</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase text-right pr-6">Subtotal</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {selectedSale.items.map((item, idx) => {
+                      const p = products.find(prod => prod.id === item.productId);
+                      return (
+                        <TableRow key={idx} className="h-16">
+                          <TableCell className="font-bold text-sm pl-6">{p?.name || 'Producto'}</TableCell>
+                          <TableCell className="text-center font-medium">{item.quantity}</TableCell>
+                          <TableCell className="text-center font-medium">${item.priceAtSale.toLocaleString()}</TableCell>
+                          <TableCell className="text-right font-black pr-6">${item.subtotal.toLocaleString()}</TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    <TableRow className="bg-muted/20">
+                      <TableCell colSpan={3} className="text-right font-bold py-4">Total:</TableCell>
+                      <TableCell className="text-right font-black text-lg pr-6 py-4">${selectedSale.totalVenta.toLocaleString()}</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="space-y-6">
+            {/* Asignar repartidor — vendedor puede asignar sus propias ventas */}
+            {!['paid', 'cancelled'].includes(selectedSale.status) && (
+              <Card className="border-none shadow-sm rounded-2xl">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-black text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                    <Truck className="w-3.5 h-3.5" /> REPARTIDOR
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {selectedSale.deliveryPersonId ? (
+                    <div className="flex items-center gap-3 bg-primary/5 p-3 rounded-xl mb-2">
+                      <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-sm">
+                        {deliveryPersons.find(d => d.id === selectedSale.deliveryPersonId)?.name.charAt(0) ?? '?'}
+                      </div>
+                      <div>
+                        <p className="font-bold text-sm">
+                          {deliveryPersons.find(d => d.id === selectedSale.deliveryPersonId)?.name ?? 'Repartidor asignado'}
+                        </p>
+                        <p className="text-[10px] text-primary font-black uppercase">Asignado</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic mb-2">Sin repartidor asignado</p>
+                  )}
+                  {deliveryPersons.length === 0 ? (
+                    <p className="text-[11px] text-muted-foreground italic">No hay repartidores disponibles.</p>
+                  ) : (
+                    <Dialog open={isAssignDeliveryOpen} onOpenChange={setIsAssignDeliveryOpen}>
+                      <DialogTrigger asChild>
+                        <Button size="sm" variant="outline" className="w-full h-9 gap-2 font-bold text-xs border-2 border-blue-200 text-blue-600 hover:bg-blue-50 rounded-xl">
+                          <Truck className="w-3.5 h-3.5" />
+                          {selectedSale.deliveryPersonId ? 'Reasignar repartidor' : 'Asignar repartidor'}
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="sm:max-w-xs">
+                        <DialogHeader>
+                          <DialogTitle>Asignar Repartidor</DialogTitle>
+                        </DialogHeader>
+                        <p className="text-xs text-muted-foreground">Pedido #{selectedSale.id.toUpperCase()}</p>
+                        <div className="space-y-2 mt-2">
+                          {deliveryPersons.map(dp => {
+                            const isAssigned = selectedSale.deliveryPersonId === dp.id;
+                            return (
+                              <button
+                                key={dp.id}
+                                className={cn(
+                                  "w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-colors",
+                                  isAssigned ? "bg-primary/10 border-primary text-primary" : "hover:bg-muted/50"
+                                )}
+                                onClick={() => {
+                                  assignDeliveryPerson(selectedSale.id, dp.id);
+                                  setIsAssignDeliveryOpen(false);
+                                }}
+                              >
+                                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">
+                                  {dp.name.charAt(0)}
+                                </div>
+                                <div>
+                                  <p className="font-bold text-sm">{dp.name}</p>
+                                  <p className="text-[10px] text-muted-foreground">{dp.city}</p>
+                                </div>
+                                {isAssigned && <span className="ml-auto text-[10px] font-black text-primary">✓ Asignado</span>}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {selectedSale.deliveryDate && (
+              <Card className="border-none shadow-xl bg-primary/5 border-l-4 border-l-primary rounded-2xl overflow-hidden animate-in fade-in duration-500">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-black text-primary uppercase flex items-center gap-2">
+                    <CalendarDays className="w-4 h-4" /> ACUERDO DE ENTREGA
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-1">
+                    <p className="text-lg font-black text-primary px-3 py-1 rounded-lg w-fit border border-primary/20">{selectedSale.deliveryDate}</p>
+                    {selectedSale.deliveryTime && (
+                      <p className="text-sm font-bold text-primary flex items-center gap-1 mt-2">
+                        <Clock className="w-3.5 h-3.5" /> {selectedSale.deliveryTime}
+                      </p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            <Card className={cn(
+              "border-none shadow-sm rounded-2xl transition-opacity",
+              isPendingConfirmation ? "opacity-50 grayscale pointer-events-none" : ""
+            )}>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-muted-foreground uppercase tracking-widest flex items-center justify-between">
+                  Cliente {isPendingConfirmation && <Badge variant="outline" className="text-[8px] bg-red-50 text-red-700">Acepta para ver</Badge>}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <Label className="text-[10px] text-muted-foreground uppercase font-black">Nombre</Label>
+                  <div className="flex items-center justify-between">
+                    <p className="font-black text-lg">{isPendingConfirmation ? '**********' : (selectedSale.customerName || 'N/A')}</p>
+                    {!isPendingConfirmation && <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => copyToClipboard(selectedSale.customerName || '')}>
+                      <Copy className="h-3 w-3" />
+                    </Button>}
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-[10px] text-muted-foreground uppercase font-black">Teléfono</Label>
+                  <div className="flex items-center justify-between">
+                    <p className="font-medium text-sm">{isPendingConfirmation ? '**********' : (selectedSale.customerPhone || 'N/A')}</p>
+                    {!isPendingConfirmation && <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => copyToClipboard(selectedSale.customerPhone || '')}>
+                      <Copy className="h-3 w-3" />
+                    </Button>}
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-[10px] text-muted-foreground uppercase font-black">Dirección</Label>
+                  <div className="flex items-center justify-between">
+                    <p className="font-medium text-xs leading-relaxed">{isPendingConfirmation ? '**********' : (selectedSale.customerAddress || 'N/A')}</p>
+                    {!isPendingConfirmation && <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => copyToClipboard(selectedSale.customerAddress || '')}>
+                      <Copy className="h-3 w-3" />
+                    </Button>}
+                  </div>
+                </div>
+                {!isPendingConfirmation && selectedSale.googleMapsLink && (
+                  <Button className="w-full gap-2 rounded-xl" onClick={() => window.open(selectedSale.googleMapsLink, '_blank')}>
+                    <ExternalLink className="w-4 h-4" /> Ver Ubicación Exacta
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+
+            {selectedSale.notes && (
+              <Card className="border-none shadow-sm rounded-2xl bg-muted/30">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-[10px] font-black text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                    <MessageSquare className="w-3.5 h-3.5" /> OBSERVACIONES
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm italic font-medium">"{selectedSale.notes}"</p>
+                </CardContent>
+              </Card>
+            )}
+
+            {selectedSale.photoUrl && !isPendingConfirmation && (
+              <Card className="border-none shadow-sm rounded-2xl overflow-hidden">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-[10px] font-black text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                    <Camera className="w-3.5 h-3.5" /> FOTO DE REFERENCIA
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-4">
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <div className="relative group cursor-pointer rounded-xl overflow-hidden border shadow-inner bg-muted/20">
+                        <img 
+                          src={selectedSale.photoUrl} 
+                          alt="Referencia de venta" 
+                          className="w-full h-auto object-cover max-h-[300px] transition-transform duration-300 group-hover:scale-105"
+                        />
+                        <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <Maximize2 className="text-white w-8 h-8 drop-shadow-lg" />
+                        </div>
+                      </div>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-4xl p-0 overflow-hidden border-none bg-transparent shadow-none">
+                      <DialogHeader className="hidden">
+                        <DialogTitle>Foto de Referencia</DialogTitle>
+                      </DialogHeader>
+                      <div className="relative w-full h-full flex items-center justify-center p-4">
+                        <img 
+                          src={selectedSale.photoUrl} 
+                          alt="Referencia Full" 
+                          className="max-w-full max-h-[90vh] rounded-xl shadow-2xl border-4 border-white/10" 
+                        />
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                </CardContent>
+              </Card>
+            )}
+
+            <div className="space-y-4">
+              <Card className="border-none shadow-2xl bg-primary text-primary-foreground rounded-3xl overflow-hidden p-8">
+                <div className="space-y-2">
+                  <p className="text-xs font-black uppercase opacity-70 tracking-widest">Total de la venta</p>
+                  <p className="text-5xl font-black tracking-tighter">${selectedSale.totalVenta.toLocaleString()}</p>
+                </div>
+              </Card>
+
+              <Card className="border-none shadow-lg bg-white border-l-8 border-l-blue-500 rounded-3xl p-8">
+                <div className="space-y-2">
+                  <p className="text-xs font-black uppercase text-muted-foreground tracking-widest flex items-center gap-2">
+                    <Truck className="w-3 h-3 text-blue-600" /> COMISIÓN REPARTIDOR
+                  </p>
+                  <p className="text-4xl font-black tracking-tighter text-blue-600">${selectedSale.totalComision.toLocaleString()}</p>
+                </div>
+              </Card>
+            </div>
+          </div>
+        </div>
+
+        <Dialog open={isScheduleDialogOpen} onOpenChange={(val) => {
+          setIsScheduleDialogOpen(val);
+          if (!val) {
+            setSelectedDate(undefined);
+            setScheduleData({ date: '', time: '' });
+          }
+        }}>
+          <DialogContent className="sm:max-w-4xl p-0 overflow-hidden border-none shadow-2xl rounded-3xl">
+            <div className="bg-primary p-6 text-primary-foreground">
+              <DialogHeader>
+                <div className="flex items-center gap-3">
+                  <div className="bg-white/20 p-2 rounded-xl">
+                    <CalendarDays className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <DialogTitle className="text-xl font-bold text-white">Agendar Entrega</DialogTitle>
+                    <DialogDescription className="text-primary-foreground/70">
+                      Selecciona la fecha y hora acordada con el cliente.
+                    </DialogDescription>
+                  </div>
+                </div>
+              </DialogHeader>
+            </div>
+            
+            <div className="p-8 space-y-8 bg-white flex flex-col items-center">
+              <div className="w-full flex justify-center">
+                <Calendar
+                  mode="single"
+                  selected={selectedDate}
+                  onSelect={setSelectedDate}
+                  locale={es}
+                  numberOfMonths={2}
+                  weekStartsOn={1}
+                  className="rounded-xl border shadow-sm p-6"
+                  classNames={{
+                    day_selected: "border-2 border-slate-900 text-slate-900 bg-slate-50 font-black rounded-xl !opacity-100 ring-offset-2 shadow-sm",
+                    day_today: "text-primary font-bold border-b-2 border-primary",
+                    head_cell: "text-muted-foreground rounded-md w-12 font-bold text-[0.8rem] lowercase",
+                    cell: "h-12 w-12 text-center p-0 relative",
+                    day: "h-12 w-12 p-0 font-medium aria-selected:opacity-100 rounded-full hover:bg-muted transition-all",
+                  }}
+                />
+              </div>
+              
+              <div className="w-full max-w-md space-y-3">
+                <Label htmlFor="time" className="text-[10px] font-black text-muted-foreground uppercase tracking-widest text-center block">HORA APROXIMADA</Label>
+                <div className="relative">
+                  <Clock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input 
+                    id="time" 
+                    placeholder="Ej: 3:30 PM" 
+                    className="h-14 pl-12 rounded-2xl border-none bg-muted/30 focus:bg-white focus:ring-2 focus:ring-primary/20 text-lg font-bold"
+                    value={scheduleData.time}
+                    onChange={e => setScheduleData({...scheduleData, time: e.target.value})}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter className="p-8 bg-muted/10 border-t flex justify-end gap-6">
+              <Button variant="ghost" onClick={() => {
+                setSelectedDate(undefined);
+                setScheduleData({ date: '', time: '' });
+                setIsScheduleDialogOpen(false);
+              }} className="px-8 h-12 rounded-xl font-bold text-muted-foreground hover:bg-transparent">
+                Borrar
+              </Button>
+              <Button onClick={confirmSchedule} className="px-10 h-12 rounded-xl font-black bg-primary text-primary-foreground shadow-lg transition-transform active:scale-95" disabled={!selectedDate}>
+                Confirmar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-black tracking-tighter">Mis Ventas</h1>
+          <p className="text-muted-foreground text-sm">Gestiona y actualiza el estado de tus entregas</p>
+        </div>
+      </div>
+
+      {/* ── Resumen por Ciudad ─────────────────────────────────────────── */}
+      {mySales.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+          {/* Conteo por ciudad */}
+          <Card className="border-none shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-black uppercase text-muted-foreground flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-primary" /> Ventas por Ciudad
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableBody>
+                  {citySummary.rows.map(([city, count]) => (
+                    <TableRow key={city} className="h-12">
+                      <TableCell className="pl-6 font-bold text-sm">{city}</TableCell>
+                      <TableCell className="text-right pr-6">
+                        <span className="bg-primary/10 text-primary font-black text-sm px-3 py-1 rounded-full">
+                          {count} {count === 1 ? 'venta' : 'ventas'}
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow className="border-t-2 bg-muted/20 h-12">
+                    <TableCell className="pl-6 font-black text-sm uppercase tracking-widest text-muted-foreground">Total</TableCell>
+                    <TableCell className="text-right pr-6">
+                      <span className="font-black text-primary text-base">{citySummary.total} ventas</span>
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+
+          {/* Tabla de ventas individuales: Neto = totalVenta − comisiónRepartidor */}
+          <Card className="border-none shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-black uppercase text-muted-foreground flex items-center gap-2">
+                <DollarSign className="w-4 h-4 text-primary" /> Detalle Financiero
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader className="bg-muted/30">
+                  <TableRow>
+                    <TableHead className="text-[10px] font-black uppercase pl-4">Fecha / Ciudad</TableHead>
+                    <TableHead className="text-[10px] font-black uppercase text-right">Cobrado</TableHead>
+                    <TableHead className="text-[10px] font-black uppercase text-right">Com. Rep.</TableHead>
+                    <TableHead className="text-[10px] font-black uppercase text-right pr-4">Neto</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {mySales.filter(s => !['cancelled', 'delivery_failed'].includes(s.status))
+                    .slice().reverse().slice(0, 8)
+                    .map(sale => (
+                    <TableRow key={sale.id} className="h-14">
+                      <TableCell className="pl-4">
+                        <p className="font-bold text-xs">{new Date(sale.createdAt).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })}</p>
+                        <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                          <MapPin className="w-2.5 h-2.5" />{sale.city || '—'}
+                        </p>
+                      </TableCell>
+                      <TableCell className="text-right text-xs font-bold">${sale.totalVenta.toLocaleString()}</TableCell>
+                      <TableCell className="text-right text-xs text-blue-600 font-bold">${sale.totalComision.toLocaleString()}</TableCell>
+                      <TableCell className="text-right font-black text-sm text-primary pr-4">${sale.totalDeposito.toLocaleString()}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {mySales.slice().reverse().map((sale) => (
+          <Card 
+            key={sale.id} 
+            className={cn(
+              "border-none shadow-sm hover:shadow-xl transition-all cursor-pointer rounded-2xl overflow-hidden group relative",
+              sale.status === 'assigned' ? "ring-2 ring-primary ring-offset-2" : ""
+            )}
+            onClick={() => setSelectedSaleId(sale.id)}
+          >
+            {sale.status === 'assigned' && (
+              <div className="absolute top-3 left-3 z-10">
+                <Badge className="bg-primary animate-pulse text-[8px] font-black uppercase">Nueva Asignación</Badge>
+              </div>
+            )}
+            <CardHeader className="bg-muted/30 pb-4">
+              <div className="flex justify-between items-start">
+                <div>
+                  <CardTitle className="text-lg font-black pt-2">#{sale.id.toUpperCase()}</CardTitle>
+                  <CardDescription className="text-[10px] font-bold uppercase">{new Date(sale.createdAt).toLocaleDateString()}</CardDescription>
+                </div>
+                <Badge className={cn(
+                  "font-black text-[10px] uppercase border-none",
+                  sale.status === 'assigned' ? "bg-muted text-muted-foreground" :
+                  sale.status === 'delivered' ? "bg-primary/20 text-primary" : 
+                  sale.status === 'paid' ? "bg-green-100 text-green-700" : 
+                  sale.status === 'cancelled' ? "bg-red-100 text-red-700" : "bg-primary/10 text-primary"
+                )}>
+                  {getStatusLabel(sale.status)}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="bg-primary/10 p-2 rounded-lg"><User className="w-4 h-4 text-primary" /></div>
+                <span className="font-bold text-sm truncate">{sale.status === 'assigned' ? '**********' : (sale.customerName || 'Cliente')}</span>
+              </div>
+              <div className="flex items-center justify-between border-t pt-4">
+                <div className="space-y-0.5">
+                  <p className="text-[9px] font-black text-muted-foreground uppercase">Total Venta</p>
+                  <p className="text-xl font-black text-primary">${sale.totalVenta.toLocaleString()}</p>
+                </div>
+                <div className="bg-primary p-2 rounded-full text-primary-foreground transition-colors group-hover:bg-primary/90">
+                  <ChevronRight className="w-5 h-5" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+        {mySales.length === 0 && (
+          <div className="col-span-full py-24 text-center bg-white rounded-3xl border-2 border-dashed flex flex-col items-center gap-4">
+             <div className="bg-muted/50 p-6 rounded-full"><ShoppingCart className="w-12 h-12 text-muted-foreground/30" /></div>
+             <div>
+                <h3 className="text-lg font-bold">Sin ventas registradas</h3>
+                <p className="text-sm text-muted-foreground italic">Las ventas que te asigne el administrador aparecerán aquí.</p>
+             </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

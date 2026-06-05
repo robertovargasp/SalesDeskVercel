@@ -1,0 +1,12 @@
+node_modules
+.next
+*.zip
+*.tgz
+
+# Variables de entorno con credenciales reales — NUNCA commitear
+.env
+.env.local
+.env.*.local
+supabase.md
+# .env.example SÍ debe estar en git (es el template sin valores reales)
+# NO agregar .env.example aquí
