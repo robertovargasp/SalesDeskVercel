@@ -32,7 +32,6 @@ export async function middleware(request: NextRequest) {
 
   // Proteger rutas del dashboard
   if (!user && request.nextUrl.pathname.startsWith('/dashboard')) {
-    supabaseResponse.cookies.delete('x-user-role');
     return NextResponse.redirect(new URL('/', request.url));
   }
 
@@ -40,19 +39,10 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   if (user && !pathname.startsWith('/api/')) {
     try {
-      // Usar rol cacheado en cookie para evitar query a DB en cada request
-      const cachedRole = request.cookies.get('x-user-role')?.value ?? null;
-      let userRole = cachedRole;
-
-      if (!userRole) {
-        const { data: profile, error: profileError } = await supabase
-          .from('profiles').select('role').eq('id', user.id).single();
-        if (profileError) throw profileError;
-        userRole = profile?.role ?? null;
-        supabaseResponse.cookies.set('x-user-role', userRole ?? '', {
-          httpOnly: true, sameSite: 'lax', path: '/', maxAge: 60 * 60 * 8,
-        });
-      }
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles').select('role').eq('id', user.id).single();
+      if (profileError) throw profileError;
+      const userRole = profile?.role ?? null;
 
       if (pathname.startsWith('/dashboard/admin') && userRole !== 'admin')
         return NextResponse.redirect(new URL('/dashboard', request.url));

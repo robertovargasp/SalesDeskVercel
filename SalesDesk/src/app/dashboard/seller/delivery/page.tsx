@@ -110,7 +110,7 @@ export default function SellerDeliveryPage() {
     else if (filterMetric === 'delivered') result = result.filter(s => ['delivered', 'paid'].includes(s.status));
     else if (filterMetric === 'failed')    result = result.filter(s => s.status === 'delivery_failed');
     if (filterDelivery !== 'all') result = result.filter(s => s.deliveryPersonId === filterDelivery);
-    if (filterCity !== 'all')     result = result.filter(s => s.city === filterCity);
+    if (filterCity !== 'all')     result = result.filter(s => s.city?.toLowerCase() === filterCity.toLowerCase());
     if (filterStatusPills.length > 0) {
       const allowed = filterStatusPills.flatMap(sv => STATUS_GROUPS[sv] ?? []);
       result = result.filter(s => allowed.includes(s.status));

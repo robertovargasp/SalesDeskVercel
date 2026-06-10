@@ -29,8 +29,8 @@ const adminLinks = [
 const sellerLinks = [
   { label: 'Mi Panel',          href: '/dashboard',                    icon: LayoutDashboard },
   { label: 'Mi Inventario',     href: '/dashboard/seller/inventory',   icon: Package },
-  { label: 'Ventas',            href: '/dashboard/admin/sales',        icon: TrendingUp },
-  { label: 'Paquetería',        href: '/dashboard/admin/delivery',     icon: Truck },
+  { label: 'Ventas',            href: '/dashboard/seller/sales',       icon: TrendingUp },
+  { label: 'Paquetería',        href: '/dashboard/seller/delivery',    icon: Truck },
   { label: 'Mis Reportes', href: '/dashboard/seller/settlements', icon: Receipt },
 ];
 
