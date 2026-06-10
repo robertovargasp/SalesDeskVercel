@@ -17,20 +17,22 @@ import { startOfDay, startOfWeek, startOfMonth, format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { SaleStatus } from '@/lib/types';
 
-type Period = 'today' | 'week' | 'month';
+type Period = 'today' | 'week' | 'month' | 'custom';
 type SortOrder = 'recent' | 'oldest' | 'highest' | 'lowest';
 type StatusGroup = 'all' | 'en_ruta' | 'entregado' | 'completado' | 'cancelado' | 'fallido';
 
 const PERIOD_OPTIONS: { key: Period; label: string }[] = [
-  { key: 'today', label: 'Hoy' },
-  { key: 'week',  label: 'Esta semana' },
-  { key: 'month', label: 'Este mes' },
+  { key: 'today',  label: 'Hoy' },
+  { key: 'week',   label: 'Esta semana' },
+  { key: 'month',  label: 'Este mes' },
+  { key: 'custom', label: 'Personalizado' },
 ];
 
 const PERIOD_SLUG: Record<Period, string> = {
-  today: 'hoy',
-  week:  'semana',
-  month: 'mes',
+  today:  'hoy',
+  week:   'semana',
+  month:  'mes',
+  custom: 'personalizado',
 };
 
 const STATUS_GROUP_MAP: Record<StatusGroup, string[]> = {
@@ -74,6 +76,8 @@ export default function SellerSettlementsPage() {
   const { currentUser, sales, products, users } = useStore();
 
   const [period, setPeriod]               = useState<Period>('week');
+  const [customFrom, setCustomFrom]       = useState('');
+  const [customTo, setCustomTo]           = useState('');
   const [filterDelivery, setFilterDelivery] = useState('all');
   const [filterStatus, setFilterStatus]   = useState<StatusGroup>('all');
   const [filterCity, setFilterCity]       = useState('all');
@@ -88,13 +92,24 @@ export default function SellerSettlementsPage() {
     const now = new Date();
     if (period === 'today') return startOfDay(now);
     if (period === 'week')  return startOfWeek(now, { weekStartsOn: 1 });
-    return startOfMonth(now);
+    if (period === 'month') return startOfMonth(now);
+    return null;
   }, [period]);
 
-  const periodSales = useMemo(
-    () => mySales.filter(s => new Date(s.createdAt) >= periodStart),
-    [mySales, periodStart]
-  );
+  const periodSales = useMemo(() => {
+    if (period === 'custom') {
+      const from = customFrom ? new Date(customFrom + 'T00:00:00') : null;
+      const to   = customTo   ? new Date(customTo   + 'T23:59:59') : null;
+      return mySales.filter(s => {
+        const d = new Date(s.createdAt);
+        if (from && d < from) return false;
+        if (to   && d > to)   return false;
+        return true;
+      });
+    }
+    if (!periodStart) return mySales;
+    return mySales.filter(s => new Date(s.createdAt) >= periodStart);
+  }, [mySales, period, periodStart, customFrom, customTo]);
 
   const deliveryPersonsInPeriod = useMemo(() => {
     const ids = new Set(periodSales.map(s => s.deliveryPersonId).filter(Boolean) as string[]);
@@ -202,21 +217,40 @@ export default function SellerSettlementsPage() {
           >
             <FileSpreadsheet className="w-4 h-4" /> Exportar Excel
           </Button>
-          <div className="flex gap-1 bg-muted/40 p-1 rounded-xl">
-            {PERIOD_OPTIONS.map(opt => (
-              <button
-                key={opt.key}
-                onClick={() => setPeriod(opt.key)}
-                className={cn(
-                  'px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wide transition-all',
-                  period === opt.key
-                    ? 'bg-white shadow-sm text-primary'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                {opt.label}
-              </button>
-            ))}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex gap-1 bg-muted/40 p-1 rounded-xl">
+              {PERIOD_OPTIONS.map(opt => (
+                <button
+                  key={opt.key}
+                  onClick={() => setPeriod(opt.key)}
+                  className={cn(
+                    'px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wide transition-all',
+                    period === opt.key
+                      ? 'bg-white shadow-sm text-primary'
+                      : 'text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {period === 'custom' && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={customFrom}
+                  onChange={e => setCustomFrom(e.target.value)}
+                  className="h-9 rounded-xl border bg-card text-xs px-3 font-medium focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+                <span className="text-xs text-muted-foreground font-bold">—</span>
+                <input
+                  type="date"
+                  value={customTo}
+                  onChange={e => setCustomTo(e.target.value)}
+                  className="h-9 rounded-xl border bg-card text-xs px-3 font-medium focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>

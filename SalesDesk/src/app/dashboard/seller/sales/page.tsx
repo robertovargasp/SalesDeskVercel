@@ -703,7 +703,7 @@ export default function SellerSalesPage() {
             </CardHeader>
             <CardContent>
               <p className="text-4xl font-black text-primary-foreground tracking-tighter">
-                ${mySales.filter(s => ['delivered','paid','cancelled'].includes(s.status)).reduce((acc, s) => acc + s.totalVenta, 0).toLocaleString()}
+                ${filteredSales.filter(s => ['delivered','paid','cancelled'].includes(s.status)).reduce((acc, s) => acc + s.totalVenta, 0).toLocaleString()}
               </p>
               <p className="text-[10px] text-primary-foreground/60 mt-2 font-medium">Valor de productos entregados</p>
             </CardContent>
@@ -717,7 +717,7 @@ export default function SellerSalesPage() {
             </CardHeader>
             <CardContent>
               <p className="text-4xl font-black text-green-600 tracking-tighter">
-                ${mySales.filter(s => ['assigned','accepted','contacting','scheduled','in_transit'].includes(s.status)).reduce((acc, s) => acc + s.totalVenta, 0).toLocaleString()}
+                ${filteredSales.filter(s => ['assigned','accepted','contacting','scheduled','in_transit'].includes(s.status)).reduce((acc, s) => acc + s.totalVenta, 0).toLocaleString()}
               </p>
               <p className="text-[10px] text-muted-foreground mt-2 font-medium">Valor de productos en camino</p>
             </CardContent>
@@ -731,7 +731,7 @@ export default function SellerSalesPage() {
             </CardHeader>
             <CardContent>
               <p className="text-4xl font-black text-orange-500 tracking-tighter">
-                ${mySales.filter(s => ['delivered','paid'].includes(s.status)).reduce((acc, s) => acc + s.totalComision, 0).toLocaleString()}
+                ${filteredSales.filter(s => ['delivered','paid'].includes(s.status)).reduce((acc, s) => acc + s.totalComision, 0).toLocaleString()}
               </p>
               <p className="text-[10px] text-muted-foreground mt-2 font-medium">A pagar a repartidores</p>
             </CardContent>
