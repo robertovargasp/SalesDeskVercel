@@ -1,7 +1,7 @@
 
 "use client"
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useStore } from '@/hooks/use-store';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Package, CheckCircle2, AlertTriangle, MessageSquare } from 'lucide-react';
+import { Package, CheckCircle2, AlertTriangle, MessageSquare, MapPin } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default function SellerInventoryPage() {
@@ -20,6 +20,19 @@ export default function SellerInventoryPage() {
 
   const myInventory = inventory.filter(i => i.sellerId === currentUser?.id);
   const myPendingAssignments = assignments.filter(a => a.sellerId === currentUser?.id && a.status === 'pending');
+
+  const sellerCity = currentUser?.city?.trim() || 'Sin ciudad';
+
+  const cityStats = useMemo(() => {
+    const rows = products
+      .map(p => {
+        const qty = myInventory.find(i => i.productId === p.id)?.quantity ?? 0;
+        return { product: p, quantity: qty };
+      })
+      .filter(row => row.quantity > 0);
+    const totalUnits = rows.reduce((s, r) => s + r.quantity, 0);
+    return { city: sellerCity, rows, totalUnits };
+  }, [myInventory, products, sellerCity]);
 
   const handleDispute = () => {
     if (selectedId) {
@@ -64,9 +77,9 @@ export default function SellerInventoryPage() {
                       <TableCell className="text-sm font-bold">{a.quantity} und.</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          <Button 
-                            size="sm" 
-                            variant="default" 
+                          <Button
+                            size="sm"
+                            variant="default"
                             className="h-8 gap-1 bg-green-600 hover:bg-green-700"
                             onClick={() => updateAssignmentStatus(a.id, 'confirmed')}
                           >
@@ -91,8 +104,8 @@ export default function SellerInventoryPage() {
                                 </p>
                                 <div className="space-y-2">
                                   <label className="text-xs font-bold uppercase">Notas / Observaciones</label>
-                                  <Input 
-                                    placeholder="Ej: Solo llegaron 8 sillas en lugar de 10..." 
+                                  <Input
+                                    placeholder="Ej: Solo llegaron 8 sillas en lugar de 10..."
                                     value={disputeNotes}
                                     onChange={(e) => setDisputeNotes(e.target.value)}
                                   />
@@ -114,54 +127,66 @@ export default function SellerInventoryPage() {
         </Card>
       )}
 
-      <Card className="border-none shadow-sm">
-        <CardHeader>
-          <CardTitle className="text-lg font-bold flex items-center gap-2">
-            <Package className="w-5 h-5 text-primary" /> Stock Disponible
-          </CardTitle>
-          <CardDescription>Resumen de tus unidades para la venta (Confirmadas)</CardDescription>
-        </CardHeader>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Producto</TableHead>
-                <TableHead>Cantidad Disponible</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {myInventory.map((item) => {
-                const product = products.find(p => p.id === item.productId);
-                return (
-                  <TableRow key={item.id}>
-                    <TableCell className="font-medium">
-                      <div className="flex items-center gap-2">
-                        <Package className="w-4 h-4 text-muted-foreground" />
-                        {product?.name}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <span className={cn(
-                        "px-3 py-1 rounded-full font-bold text-xs",
-                        item.quantity < 5 ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"
-                      )}>
-                        {item.quantity} unidades
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-              {myInventory.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={2} className="text-center py-12 text-muted-foreground italic">
-                    No tienes inventario confirmado actualmente.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      {/* ── Stock por ciudad ──────────────────────────────────────────────── */}
+      {cityStats.rows.length > 0 ? (
+        <Card className="border-none shadow-sm rounded-2xl overflow-hidden">
+          <CardHeader className="bg-primary/5 pb-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="bg-primary/10 p-2 rounded-xl">
+                  <MapPin className="w-4 h-4 text-primary" />
+                </div>
+                <div>
+                  <CardTitle className="text-base font-black">{cityStats.city}</CardTitle>
+                  <p className="text-[10px] text-muted-foreground">Tu ciudad — stock confirmado</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-[9px] font-black text-muted-foreground uppercase">Total</p>
+                <p className="text-2xl font-black text-primary">{cityStats.totalUnits}</p>
+                <p className="text-[9px] text-muted-foreground">uds</p>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="divide-y">
+              {cityStats.rows.map(({ product, quantity }) => (
+                <div key={product.id} className="flex items-center justify-between px-5 py-3 hover:bg-muted/20 transition-colors">
+                  <div className="flex items-center gap-2">
+                    <Package className="w-3.5 h-3.5 text-muted-foreground" />
+                    <div>
+                      <p className="text-sm font-medium">{product.name}</p>
+                      <p className="text-[10px] text-muted-foreground">${product.price.toLocaleString()} c/u</p>
+                    </div>
+                  </div>
+                  <span className={cn(
+                    "text-sm font-black px-3 py-0.5 rounded-full",
+                    quantity < (product.minStock ?? 4)
+                      ? "bg-red-100 text-red-700"
+                      : "bg-green-100 text-green-700"
+                  )}>
+                    {quantity} uds
+                  </span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="border-none shadow-sm">
+          <CardContent className="py-16 text-center flex flex-col items-center gap-3">
+            <div className="bg-muted/50 p-5 rounded-full">
+              <Package className="w-8 h-8 text-muted-foreground/30" />
+            </div>
+            <div>
+              <p className="font-bold text-sm">Sin stock confirmado</p>
+              <p className="text-xs text-muted-foreground italic">
+                {sellerCity !== 'Sin ciudad' ? `No tienes unidades disponibles en ${sellerCity}.` : 'No tienes inventario confirmado actualmente.'}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

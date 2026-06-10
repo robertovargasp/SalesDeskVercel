@@ -16,6 +16,19 @@ export interface UserProfile {
   settlementStartDay: number;
 }
 
+export interface NewUserPayload {
+  name: string;
+  username: string;
+  email?: string;
+  city: string;
+  phone?: string;
+  whatsapp?: string;
+  role?: UserRole;
+  password: string;
+  settlementFrequency?: SettlementFrequency;
+  settlementStartDay?: number;
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -64,7 +77,7 @@ export type SaleStatus =
 export interface SaleEvent {
   date: string;
   type: 'creation' | 'assignment' | 'acceptance' | 'dispatch' | 'delivery' | 'payment' | 'cancel' | 'schedule' | 'failure';
-  userId: string;
+  userId: string | null;
   userName: string;
   note?: string;
 }
@@ -113,14 +126,14 @@ export interface KardexEntry {
   quantity: number;
   balanceBefore: number;
   balanceAfter: number;
-  userId: string;
+  userId: string | null;
   userName: string;
   createdAt: string;
   saleId?: string;
   notes?: string;
 }
 
-export type SettlementStatus = 'pending' | 'reported' | 'confirmed';
+export type SettlementStatus = 'pending' | 'reported' | 'confirmed' | 'rejected';
 
 export interface WeeklySettlement {
   id: string;
@@ -134,5 +147,6 @@ export interface WeeklySettlement {
   reference?: string;
   reportedAt?: string;
   confirmedAt?: string;
+  rejectionReason?: string;
   createdAt: string;
 }

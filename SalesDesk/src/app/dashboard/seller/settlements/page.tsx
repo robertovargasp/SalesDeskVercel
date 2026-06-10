@@ -1,533 +1,438 @@
-
 "use client"
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
+import * as XLSX from 'xlsx';
 import { useStore } from '@/hooks/use-store';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow
-} from '@/components/ui/table';
-import {
-  Wallet, Send, CheckCircle2, Copy, AlertCircle, Camera,
-  Calendar, DollarSign, TrendingUp, ShoppingBag, MapPin, Users
+  ShoppingBag, DollarSign, Users, MapPin, Calendar,
+  TrendingUp, CheckCircle2, Truck, XCircle, Clock,
+  FileSpreadsheet, X,
 } from 'lucide-react';
-import { format, startOfWeek, addDays, startOfDay } from 'date-fns';
-import { es } from 'date-fns/locale';
-import { toast } from '@/hooks/use-toast';
+import { startOfDay, startOfWeek, startOfMonth, format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { SaleStatus } from '@/lib/types';
+
+type Period = 'today' | 'week' | 'month';
+type SortOrder = 'recent' | 'oldest' | 'highest' | 'lowest';
+type StatusGroup = 'all' | 'en_ruta' | 'entregado' | 'completado' | 'cancelado' | 'fallido';
+
+const PERIOD_OPTIONS: { key: Period; label: string }[] = [
+  { key: 'today', label: 'Hoy' },
+  { key: 'week',  label: 'Esta semana' },
+  { key: 'month', label: 'Este mes' },
+];
+
+const PERIOD_SLUG: Record<Period, string> = {
+  today: 'hoy',
+  week:  'semana',
+  month: 'mes',
+};
+
+const STATUS_GROUP_MAP: Record<StatusGroup, string[]> = {
+  all:        [],
+  en_ruta:    ['assigned', 'accepted', 'contacting', 'scheduled', 'in_transit'],
+  entregado:  ['delivered', 'delivery_confirmed'],
+  completado: ['paid'],
+  cancelado:  ['cancelled'],
+  fallido:    ['delivery_failed'],
+};
+
+const STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof CheckCircle2 }> = {
+  assigned:           { label: 'Por Confirmar', color: 'bg-muted text-muted-foreground',  icon: Clock        },
+  accepted:           { label: 'Confirmada',    color: 'bg-blue-100 text-blue-700',       icon: Truck        },
+  contacting:         { label: 'En Contacto',   color: 'bg-indigo-100 text-indigo-700',   icon: Truck        },
+  scheduled:          { label: 'Agendado',      color: 'bg-purple-100 text-purple-700',   icon: Calendar     },
+  in_transit:         { label: 'En Camino',     color: 'bg-orange-100 text-orange-700',   icon: Truck        },
+  delivered:          { label: 'Entregado',     color: 'bg-green-100 text-green-700',     icon: CheckCircle2 },
+  delivery_confirmed: { label: 'Entregado',     color: 'bg-green-100 text-green-700',     icon: CheckCircle2 },
+  paid:               { label: 'Completado',    color: 'bg-primary/10 text-primary',      icon: CheckCircle2 },
+  cancelled:          { label: 'Cancelado',     color: 'bg-red-100 text-red-700',         icon: XCircle      },
+  delivery_failed:    { label: 'Fallido',       color: 'bg-red-100 text-red-800',         icon: XCircle      },
+};
+
+function getSaleStatusLabel(status: SaleStatus, failureReason?: string | null): string {
+  if (status === 'delivery_failed')
+    return failureReason?.startsWith('Rechazado') ? 'Rechazado' : 'Fallido';
+  return STATUS_CONFIG[status]?.label ?? status;
+}
+
+function StatusBadge({ status, failureReason }: { status: SaleStatus; failureReason?: string | null }) {
+  const cfg = STATUS_CONFIG[status] ?? { label: status, color: 'bg-muted text-muted-foreground' };
+  return (
+    <Badge className={cn('text-[9px] font-black uppercase border-none px-2 h-5', cfg.color)}>
+      {getSaleStatusLabel(status, failureReason)}
+    </Badge>
+  );
+}
 
 export default function SellerSettlementsPage() {
-  const { currentUser, sales, settlements, paymentInfo, reportSettlement } = useStore();
-  const [reference, setReference] = useState('');
-  const [customAmount, setCustomAmount] = useState('');
-  const [proofBase64, setProofBase64] = useState<string | undefined>(undefined);
+  const { currentUser, sales, products, users } = useStore();
 
-  const mySettlements = settlements.filter(s => s.sellerId === currentUser?.id);
+  const [period, setPeriod]               = useState<Period>('week');
+  const [filterDelivery, setFilterDelivery] = useState('all');
+  const [filterStatus, setFilterStatus]   = useState<StatusGroup>('all');
+  const [filterCity, setFilterCity]       = useState('all');
+  const [sortOrder, setSortOrder]         = useState<SortOrder>('recent');
 
-  const periodData = useMemo(() => {
-    if (!currentUser || !sales) return null;
+  const mySales = useMemo(
+    () => sales.filter(s => s.sellerId === currentUser?.id),
+    [sales, currentUser]
+  );
 
-    const today = startOfDay(new Date());
-    const startDay = currentUser.settlementStartDay || 1;
+  const periodStart = useMemo(() => {
+    const now = new Date();
+    if (period === 'today') return startOfDay(now);
+    if (period === 'week')  return startOfWeek(now, { weekStartsOn: 1 });
+    return startOfMonth(now);
+  }, [period]);
 
-    const start = startOfWeek(today, { weekStartsOn: startDay as 0 | 1 | 2 | 3 | 4 | 5 | 6 });
-    const end = addDays(start, 6);
-    const rangeLabel = `${format(start, 'd MMM', { locale: es })} - ${format(end, 'd MMM', { locale: es })}`;
+  const periodSales = useMemo(
+    () => mySales.filter(s => new Date(s.createdAt) >= periodStart),
+    [mySales, periodStart]
+  );
 
-    // Solo ventas confirmadas por el admin y aún no liquidadas
-    // Las ventas ya aprobadas tienen status 'paid' y se excluyen automáticamente
-    const myRelevantSales = sales.filter(
-      s => s.sellerId === currentUser.id && s.status === 'delivery_confirmed'
-    );
+  const deliveryPersonsInPeriod = useMemo(() => {
+    const ids = new Set(periodSales.map(s => s.deliveryPersonId).filter(Boolean) as string[]);
+    return users.filter(u => ids.has(u.id) && u.role === 'delivery');
+  }, [periodSales, users]);
 
-    const totalVenta = myRelevantSales.reduce((acc, s) => acc + (s.totalVenta || 0), 0);
-    const totalComision = myRelevantSales.reduce((acc, s) => acc + (s.totalComision || 0), 0);
-    const ventaNeta = totalVenta - totalComision;
+  const citiesInPeriod = useMemo(
+    () => Array.from(new Set(periodSales.map(s => s.city).filter(Boolean))).sort() as string[],
+    [periodSales]
+  );
 
-    const saldoPendienteReal = myRelevantSales.reduce((acc, s) => acc + (s.totalDeposito || 0), 0);
+  const filteredSales = useMemo(() => {
+    let result = [...periodSales];
+    if (filterDelivery !== 'all')
+      result = result.filter(s => s.deliveryPersonId === filterDelivery);
+    if (filterStatus !== 'all')
+      result = result.filter(s => STATUS_GROUP_MAP[filterStatus].includes(s.status));
+    if (filterCity !== 'all')
+      result = result.filter(s => s.city === filterCity);
+    return result;
+  }, [periodSales, filterDelivery, filterStatus, filterCity]);
 
-    return {
-      rangeLabel,
-      totalVenta,
-      totalComision,
-      ventaNeta,
-      totalDeposito: ventaNeta,
-      saldoPendiente: saldoPendienteReal,
-      count: myRelevantSales.length,
-      sales: myRelevantSales,
-    };
-  }, [sales, currentUser]);
+  const sortedSales = useMemo(() => {
+    const arr = [...filteredSales];
+    if (sortOrder === 'recent')  arr.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    if (sortOrder === 'oldest')  arr.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    if (sortOrder === 'highest') arr.sort((a, b) => b.totalVenta - a.totalVenta);
+    if (sortOrder === 'lowest')  arr.sort((a, b) => a.totalVenta - b.totalVenta);
+    return arr;
+  }, [filteredSales, sortOrder]);
+
+  const metrics = useMemo(() => ({
+    totalVentas:   filteredSales.length,
+    totalVenta:    filteredSales.reduce((s, v) => s + v.totalVenta, 0),
+    totalComision: filteredSales.reduce((s, v) => s + v.totalComision, 0),
+    entregadas:    filteredSales.filter(s => ['delivered', 'delivery_confirmed', 'paid'].includes(s.status)).length,
+  }), [filteredSales]);
 
   const citySummary = useMemo(() => {
-    if (!periodData?.sales?.length) return [];
-    const map = new Map<string, { count: number; totalVenta: number; totalComision: number }>();
-    for (const s of periodData.sales) {
-      const city = s.city || 'Sin ciudad';
-      const prev = map.get(city) ?? { count: 0, totalVenta: 0, totalComision: 0 };
-      map.set(city, {
-        count: prev.count + 1,
-        totalVenta: prev.totalVenta + s.totalVenta,
-        totalComision: prev.totalComision + s.totalComision,
-      });
+    const map = new Map<string, { city: string; delivery: string; count: number; totalVenta: number; totalComision: number }>();
+    for (const s of filteredSales) {
+      const city = s.city?.trim() || 'Sin ciudad';
+      const deliveryId = s.deliveryPersonId ?? '';
+      const deliveryName = deliveryId
+        ? (users.find(u => u.id === deliveryId)?.name ?? 'Repartidor')
+        : 'Sin asignar';
+      const key = `${city}||${deliveryId}`;
+      const prev = map.get(key) ?? { city, delivery: deliveryName, count: 0, totalVenta: 0, totalComision: 0 };
+      map.set(key, { ...prev, count: prev.count + 1, totalVenta: prev.totalVenta + s.totalVenta, totalComision: prev.totalComision + s.totalComision });
     }
-    return Array.from(map.entries())
-      .map(([city, d]) => ({ city, ...d, ventaNeta: d.totalVenta - d.totalComision }))
-      .sort((a, b) => b.totalVenta - a.totalVenta);
-  }, [periodData]);
+    return Array.from(map.values()).sort((a, b) => b.totalVenta - a.totalVenta);
+  }, [filteredSales, users]);
 
-  useEffect(() => {
-    if (periodData) setCustomAmount(periodData.saldoPendiente.toString());
-  }, [periodData]);
+  const hasFilters = filterDelivery !== 'all' || filterStatus !== 'all' || filterCity !== 'all';
 
-  const handleCopyInfo = () => {
-    navigator.clipboard.writeText(paymentInfo);
-    toast({ title: 'Copiado', description: 'Datos bancarios copiados al portapapeles.' });
+  const clearFilters = () => {
+    setFilterDelivery('all');
+    setFilterStatus('all');
+    setFilterCity('all');
+    setSortOrder('recent');
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => setProofBase64(reader.result as string);
-      reader.readAsDataURL(file);
-    }
+  const handleExport = () => {
+    const rows = sortedSales.map(s => {
+      const deliveryName = s.deliveryPersonId
+        ? (users.find(u => u.id === s.deliveryPersonId)?.name ?? 'Repartidor')
+        : 'Sin asignar';
+      const productos = s.items.map(item => {
+        const p = products.find(prod => prod.id === item.productId);
+        return `${p?.name || 'Producto'} ×${item.quantity}`;
+      }).join(', ');
+      return {
+        'Fecha':               format(new Date(s.createdAt), 'dd/MM/yyyy'),
+        'Cliente':             s.customerName || '',
+        'Ciudad':              s.city || '',
+        'Productos':           productos,
+        'Repartidor':          deliveryName,
+        'Estado':              getSaleStatusLabel(s.status as SaleStatus, s.failureReason),
+        'Total Cobrado':       s.totalVenta,
+        'Comisión Repartidor': s.totalComision,
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Ventas');
+    XLSX.writeFile(wb, `reporte-ventas-${PERIOD_SLUG[period]}-${format(new Date(), 'dd-MM-yyyy')}.xlsx`);
   };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const amount = parseFloat(customAmount);
-    if (!periodData || isNaN(amount) || amount <= 0) {
-      toast({ variant: 'destructive', title: 'Monto inválido', description: 'Ingresa una cantidad válida a depositar.' });
-      return;
-    }
-    if (!reference) {
-      toast({ variant: 'destructive', title: 'Referencia requerida', description: 'Ingresa un número de folio o referencia de pago.' });
-      return;
-    }
-    await reportSettlement(
-      currentUser!.id,
-      periodData.rangeLabel,
-      periodData.totalVenta,
-      periodData.totalComision,
-      amount,
-      reference,
-      proofBase64,
-      periodData.sales.map(s => s.id)
-    );
-    setReference('');
-    setProofBase64(undefined);
-  };
-
-  if (!periodData) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-      </div>
-    );
-  }
 
   return (
-    <div className="space-y-8 pb-20">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+    <div className="space-y-8 pb-16">
+
+      {/* ── Header ───────────────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-black tracking-tight text-primary">Corte de Caja Automático</h1>
-          <p className="text-muted-foreground text-sm">Resumen de ventas listas para liquidar</p>
+          <h1 className="text-3xl font-black tracking-tight">Mis Ventas</h1>
+          <p className="text-muted-foreground text-sm">Reporte de desempeño — solo lectura</p>
         </div>
-        <Badge variant="outline" className="gap-2 px-4 py-2 bg-white shadow-sm border-primary/20 rounded-xl">
-          <Calendar className="w-4 h-4 text-primary" />
-          <span className="font-bold text-xs">Periodo: {periodData.rangeLabel}</span>
-        </Badge>
+        <div className="flex items-center gap-3 flex-wrap">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2 font-bold h-9"
+            onClick={handleExport}
+            disabled={sortedSales.length === 0}
+          >
+            <FileSpreadsheet className="w-4 h-4" /> Exportar Excel
+          </Button>
+          <div className="flex gap-1 bg-muted/40 p-1 rounded-xl">
+            {PERIOD_OPTIONS.map(opt => (
+              <button
+                key={opt.key}
+                onClick={() => setPeriod(opt.key)}
+                className={cn(
+                  'px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wide transition-all',
+                  period === opt.key
+                    ? 'bg-white shadow-sm text-primary'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
-      {/* 4 tarjetas del resumen financiero */}
+      {/* ── Cards ────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="border-none shadow-xl bg-white border-b-4 border-b-primary">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-[10px] font-black text-muted-foreground uppercase tracking-widest flex items-center gap-2">
-              <ShoppingBag className="w-3.5 h-3.5" /> TOTAL VENTAS
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-black tracking-tighter text-foreground">
-              ${periodData.totalVenta.toLocaleString()}
-            </p>
-            <p className="text-[9px] text-muted-foreground mt-1 italic">Ventas entregadas del período</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-none shadow-xl bg-white border-b-4 border-b-orange-400">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-[10px] font-black text-orange-500 uppercase tracking-widest flex items-center gap-2">
-              <Users className="w-3.5 h-3.5" /> COMISIÓN REPARTIDORES
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-black tracking-tighter text-orange-500">
-              ${periodData.totalComision.toLocaleString()}
-            </p>
-            <p className="text-[9px] text-muted-foreground mt-1 italic">Total pagado a repartidores</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-none shadow-xl bg-white border-b-4 border-b-blue-500">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-[10px] font-black text-blue-600 uppercase tracking-widest flex items-center gap-2">
-              <TrendingUp className="w-3.5 h-3.5" /> VENTA NETA
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-black tracking-tighter text-blue-600">
-              ${periodData.ventaNeta.toLocaleString()}
-            </p>
-            <p className="text-[9px] text-muted-foreground mt-1 italic">Total Ventas − Comisión Repartidores</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-none shadow-2xl bg-primary text-primary-foreground border-b-4 border-b-primary">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-[10px] font-black text-primary-foreground/70 uppercase tracking-widest flex items-center gap-2">
-              <Wallet className="w-3.5 h-3.5" /> A DEPOSITAR AL ADMIN
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-4xl font-black tracking-tighter text-white">
-              ${periodData.ventaNeta.toLocaleString()}
-            </p>
-            <p className="text-[9px] text-primary-foreground/60 mt-1 italic">Total a entregar</p>
-          </CardContent>
-        </Card>
+        {[
+          { label: 'Ventas',                   value: metrics.totalVentas,                              icon: ShoppingBag,  color: 'text-primary',    bg: 'bg-primary/10' },
+          { label: 'Total Ventas',             value: `$${metrics.totalVenta.toLocaleString()}`,        icon: DollarSign,   color: 'text-green-600',  bg: 'bg-green-50'   },
+          { label: 'Comisiones Repartidores',  value: `$${metrics.totalComision.toLocaleString()}`,     icon: Users,        color: 'text-orange-600', bg: 'bg-orange-50'  },
+          { label: 'Entregadas',               value: metrics.entregadas,                               icon: CheckCircle2, color: 'text-blue-600',   bg: 'bg-blue-50'    },
+        ].map((m, i) => (
+          <Card key={i} className="border-none shadow-sm">
+            <CardContent className="p-5 flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-black text-muted-foreground uppercase tracking-wider">{m.label}</p>
+                <p className="text-2xl font-black mt-1">{m.value}</p>
+              </div>
+              <div className={cn('p-3 rounded-xl', m.bg)}>
+                <m.icon className={cn('w-5 h-5', m.color)} />
+              </div>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
-      {/* Desglose por ciudad */}
+      {/* ── Filtros ──────────────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-2 p-3 bg-muted/30 rounded-2xl border border-muted/40">
+        <Select value={filterDelivery} onValueChange={setFilterDelivery}>
+          <SelectTrigger className="w-44 h-9 bg-card border shadow-sm text-xs">
+            <Truck className="w-3.5 h-3.5 mr-1 text-muted-foreground" />
+            <SelectValue placeholder="Repartidor" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos los repartidores</SelectItem>
+            {deliveryPersonsInPeriod.map(d => (
+              <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={filterStatus} onValueChange={v => setFilterStatus(v as StatusGroup)}>
+          <SelectTrigger className="w-36 h-9 bg-card border shadow-sm text-xs">
+            <SelectValue placeholder="Estado" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos los estados</SelectItem>
+            <SelectItem value="en_ruta">En Ruta</SelectItem>
+            <SelectItem value="entregado">Entregado</SelectItem>
+            <SelectItem value="completado">Liquidado</SelectItem>
+            <SelectItem value="cancelado">Cancelado</SelectItem>
+            <SelectItem value="fallido">Fallido</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select value={filterCity} onValueChange={setFilterCity}>
+          <SelectTrigger className="w-40 h-9 bg-card border shadow-sm text-xs">
+            <MapPin className="w-3.5 h-3.5 mr-1 text-muted-foreground" />
+            <SelectValue placeholder="Ciudad" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todas las ciudades</SelectItem>
+            {citiesInPeriod.map(c => (
+              <SelectItem key={c} value={c}>{c}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={sortOrder} onValueChange={v => setSortOrder(v as SortOrder)}>
+          <SelectTrigger className="w-44 h-9 bg-card border shadow-sm text-xs">
+            <SelectValue placeholder="Orden" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="recent">Más reciente</SelectItem>
+            <SelectItem value="oldest">Más antiguo</SelectItem>
+            <SelectItem value="highest">Mayor monto</SelectItem>
+            <SelectItem value="lowest">Menor monto</SelectItem>
+          </SelectContent>
+        </Select>
+
+        {hasFilters && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-9 text-xs text-muted-foreground hover:text-foreground gap-1"
+            onClick={clearFilters}
+          >
+            <X className="w-3 h-3" /> Limpiar
+          </Button>
+        )}
+
+        <span className="ml-auto text-xs text-muted-foreground font-bold">
+          Mostrando {filteredSales.length} de {periodSales.length} pedidos
+        </span>
+      </div>
+
+      {/* ── Ventas por Ciudad × Repartidor ───────────────────────────────── */}
       {citySummary.length > 0 && (
-        <Card className="border-none shadow-xl bg-white rounded-[2rem] overflow-hidden">
-          <CardHeader className="px-8 pt-8 pb-4 border-b bg-muted/20">
-            <div className="flex items-center gap-3">
-              <div className="bg-primary/10 p-2 rounded-xl text-primary">
-                <MapPin className="w-5 h-5" />
-              </div>
-              <div>
-                <CardTitle className="text-xl font-black">Ventas por Ciudad</CardTitle>
-                <CardDescription className="text-xs font-medium">
-                  Desglose del período actual por zona de entrega
-                </CardDescription>
-              </div>
-            </div>
+        <Card className="border-none shadow-sm rounded-2xl overflow-hidden">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-black uppercase text-muted-foreground flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-primary" /> Ventas por Ciudad
+            </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <Table>
               <TableHeader className="bg-muted/30">
-                <TableRow className="hover:bg-transparent border-none">
-                  <TableHead className="text-[10px] font-black uppercase pl-8 h-10">Ciudad</TableHead>
-                  <TableHead className="text-[10px] font-black uppercase text-center h-10">Ventas</TableHead>
-                  <TableHead className="text-[10px] font-black uppercase text-right h-10">Total Cobrado</TableHead>
-                  <TableHead className="text-[10px] font-black uppercase text-right h-10">Com. Repartidor</TableHead>
-                  <TableHead className="text-[10px] font-black uppercase text-right pr-8 h-10">Venta Neta</TableHead>
+                <TableRow>
+                  <TableHead className="text-[10px] font-black uppercase pl-6">Ciudad</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase">Repartidor</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase text-center">Ventas</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase text-right">Total Cobrado</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase text-right pr-6">Comisión Rep.</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {citySummary.map((row) => (
-                  <TableRow key={row.city} className="h-12 hover:bg-muted/10 border-b border-muted/20">
-                    <TableCell className="pl-8">
-                      <span className="font-black text-sm uppercase tracking-tight">{row.city}</span>
-                    </TableCell>
+                {citySummary.map((row, i) => (
+                  <TableRow key={i} className="h-11">
+                    <TableCell className="pl-6 font-bold text-sm">{row.city}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{row.delivery}</TableCell>
                     <TableCell className="text-center">
                       <Badge variant="secondary" className="font-bold text-xs">{row.count}</Badge>
                     </TableCell>
-                    <TableCell className="text-right font-bold">${row.totalVenta.toLocaleString()}</TableCell>
-                    <TableCell className="text-right text-orange-500 font-bold">
-                      ${row.totalComision.toLocaleString()}
-                    </TableCell>
-                    <TableCell className="text-right pr-8 font-black text-primary">
-                      ${row.ventaNeta.toLocaleString()}
-                    </TableCell>
+                    <TableCell className="text-right font-black text-primary">${row.totalVenta.toLocaleString()}</TableCell>
+                    <TableCell className="text-right font-bold text-orange-600 pr-6">${row.totalComision.toLocaleString()}</TableCell>
                   </TableRow>
                 ))}
-                <TableRow className="bg-muted/20 hover:bg-muted/30 font-black">
-                  <TableCell className="pl-8 text-[10px] uppercase tracking-widest text-muted-foreground">
-                    Total General
-                  </TableCell>
-                  <TableCell className="text-center font-black">{periodData.count}</TableCell>
-                  <TableCell className="text-right font-black">${periodData.totalVenta.toLocaleString()}</TableCell>
-                  <TableCell className="text-right font-black text-orange-500">
-                    ${periodData.totalComision.toLocaleString()}
-                  </TableCell>
-                  <TableCell className="text-right pr-8 font-black text-primary">
-                    ${periodData.ventaNeta.toLocaleString()}
-                  </TableCell>
-                </TableRow>
               </TableBody>
             </Table>
           </CardContent>
         </Card>
       )}
 
-      {/* Grid principal: formulario + detalle de ventas / sidebar */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <div className="lg:col-span-8 space-y-8">
-          {/* Formulario de corte — sin cambios funcionales */}
-          <Card className="border-none shadow-2xl bg-white rounded-[2rem] overflow-hidden">
-            <CardHeader className="p-8 border-b bg-muted/20">
-              <div className="flex items-center gap-4">
-                <div className="bg-primary/10 p-3 rounded-2xl text-primary">
-                  <Send className="w-6 h-6" />
-                </div>
-                <div>
-                  <CardTitle className="text-xl font-black">Finalizar Corte Semanal</CardTitle>
-                  <CardDescription className="text-xs font-medium">
-                    Informa tu depósito para limpiar tu saldo pendiente
-                  </CardDescription>
-                </div>
+      {/* ── Tabla de pedidos ─────────────────────────────────────────────── */}
+      <Card className="border-none shadow-sm rounded-2xl overflow-hidden">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-black uppercase text-muted-foreground flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-primary" /> Pedidos del período
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {sortedSales.length === 0 ? (
+            <div className="py-20 text-center flex flex-col items-center gap-3">
+              <div className="bg-muted/40 p-5 rounded-full">
+                <ShoppingBag className="w-8 h-8 text-muted-foreground/30" />
               </div>
-            </CardHeader>
-            <CardContent className="p-8">
-              {periodData.count === 0 && (
-                <div className="flex flex-col items-center gap-4 py-10 text-center">
-                  <div className="bg-green-50 p-5 rounded-full">
-                    <CheckCircle2 className="w-10 h-10 text-green-500" />
-                  </div>
-                  <div>
-                    <p className="font-black text-lg text-green-700">Período al día</p>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      No tienes ventas pendientes de liquidar. Cuando el admin confirme nuevas entregas aparecerán aquí.
-                    </p>
-                  </div>
-                </div>
-              )}
-              {periodData.count > 0 && (
-              <form onSubmit={handleSubmit} className="space-y-8">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  <div className="space-y-3">
-                    <Label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
-                      Monto Depositado ($)
-                    </Label>
-                    <div className="relative">
-                      <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                      <Input
-                        type="number"
-                        value={customAmount}
-                        onChange={(e) => setCustomAmount(e.target.value)}
-                        className="pl-12 h-14 border-none bg-muted/30 focus:bg-white focus:ring-2 focus:ring-primary/20 rounded-2xl text-lg font-black"
-                      />
-                    </div>
-                    {periodData.saldoPendiente > 0 && (
-                      <p className="text-[10px] font-bold text-orange-600 px-2">
-                        Sugerido por ventas entregadas: ${periodData.saldoPendiente.toLocaleString()}
-                      </p>
-                    )}
-                  </div>
-                  <div className="space-y-3">
-                    <Label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
-                      Folio / Referencia
-                    </Label>
-                    <Input
-                      placeholder="Ej: Transf. #98765..."
-                      value={reference}
-                      onChange={(e) => setReference(e.target.value)}
-                      className="h-14 border-none bg-muted/30 focus:bg-white focus:ring-2 focus:ring-primary/20 rounded-2xl font-bold"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <Label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
-                    Ticket de Pago
-                  </Label>
-                  <div className="flex items-center gap-6">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="gap-3 h-16 px-8 border-dashed border-2 bg-muted/10 hover:bg-primary/5 hover:border-primary/40 rounded-2xl transition-all"
-                      asChild
-                    >
-                      <label>
-                        <Camera className="w-6 h-6" />
-                        <span className="font-black text-sm">{proofBase64 ? 'Cambiar Foto' : 'Subir Comprobante'}</span>
-                        <input type="file" className="hidden" accept="image/*" onChange={handleFileChange} />
-                      </label>
-                    </Button>
-                    {proofBase64 ? (
-                      <div className="flex items-center gap-2 text-green-600 animate-in zoom-in">
-                        <CheckCircle2 className="w-6 h-6" />
-                        <span className="text-[10px] font-black uppercase tracking-widest">¡Foto Lista!</span>
-                      </div>
-                    ) : (
-                      <p className="text-[10px] text-red-500 font-bold">* Requerido para enviar el reporte</p>
-                    )}
-                  </div>
-                </div>
-
-                <Button
-                  type="submit"
-                  className="w-full h-16 text-lg font-black gap-3 shadow-2xl rounded-2xl transition-all hover:scale-[1.01] active:scale-95"
-                  disabled={parseFloat(customAmount) <= 0 || !reference.trim() || !proofBase64}
-                >
-                  <Send className="w-5 h-5" /> Enviar Reporte de Corte
-                </Button>
-              </form>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Detalle de ventas del corte */}
-          <Card className="border-none shadow-xl bg-white rounded-[2rem] overflow-hidden">
-            <CardHeader className="px-8 pt-8">
-              <div className="flex items-center gap-3">
-                <div className="bg-primary/10 p-2 rounded-xl text-primary">
-                  <TrendingUp className="w-5 h-5" />
-                </div>
-                <div>
-                  <CardTitle className="text-xl font-black">Detalle del Corte Actual</CardTitle>
-                  <CardDescription className="text-xs font-medium">
-                    Historial de ventas que componen tu balance semanal
-                  </CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader className="bg-muted/30">
-                  <TableRow className="hover:bg-transparent border-none">
-                    <TableHead className="text-[10px] font-black uppercase pl-8 h-12">Cliente / Fecha</TableHead>
-                    <TableHead className="text-[10px] font-black uppercase text-center h-12">Ciudad</TableHead>
-                    <TableHead className="text-[10px] font-black uppercase text-center h-12">Estado</TableHead>
-                    <TableHead className="text-[10px] font-black uppercase text-center h-12">Cobrado ($)</TableHead>
-                    <TableHead className="text-[10px] font-black uppercase text-right pr-8 h-12">A Liquidar</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {periodData.sales.slice().reverse().map((sale) => (
-                    <TableRow key={sale.id} className="h-16 hover:bg-muted/10 transition-colors border-b border-muted/20">
-                      <TableCell className="pl-8">
-                        <div className="flex flex-col">
-                          <span className="text-sm font-black truncate max-w-[150px] uppercase tracking-tight">
-                            {sale.customerName || 'Sin Nombre'}
-                          </span>
-                          <span className="text-[9px] font-medium text-muted-foreground">
-                            {new Date(sale.createdAt).toLocaleDateString()}
-                          </span>
+              <p className="text-sm text-muted-foreground italic">Sin pedidos en este período</p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader className="bg-muted/30">
+                <TableRow>
+                  <TableHead className="text-[10px] font-black uppercase pl-6">Fecha</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase">Cliente</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase">Productos</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase">Repartidor</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase text-center">Estado</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase text-right">Cobrado</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase text-right pr-6">Comisión Rep.</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sortedSales.map(sale => {
+                  const deliveryName = sale.deliveryPersonId
+                    ? (users.find(u => u.id === sale.deliveryPersonId)?.name ?? 'Repartidor')
+                    : 'Sin asignar';
+                  return (
+                    <TableRow key={sale.id} className="h-14 hover:bg-muted/10 transition-colors">
+                      <TableCell className="pl-6 text-xs text-muted-foreground whitespace-nowrap">
+                        {new Date(sale.createdAt).toLocaleDateString('es-MX', {
+                          day: '2-digit', month: 'short', year: 'numeric',
+                        })}
+                      </TableCell>
+                      <TableCell>
+                        <p className="font-bold text-sm">{sale.customerName || 'Cliente'}</p>
+                        <div className="flex items-center gap-1 text-muted-foreground">
+                          <MapPin className="w-3 h-3" />
+                          <span className="text-[10px]">{sale.city || '—'}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="space-y-0.5">
+                          {sale.items.map((item, idx) => {
+                            const p = products.find(prod => prod.id === item.productId);
+                            return (
+                              <p key={idx} className="text-xs text-muted-foreground">
+                                {p?.name || 'Producto'}{' '}
+                                <span className="font-bold text-foreground">×{item.quantity}</span>
+                              </p>
+                            );
+                          })}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <Truck className="w-3 h-3 text-muted-foreground shrink-0" />
+                          <span className="text-xs">{deliveryName}</span>
                         </div>
                       </TableCell>
                       <TableCell className="text-center">
-                        <span className="text-[9px] font-bold text-muted-foreground uppercase">
-                          {sale.city || '—'}
-                        </span>
+                        <StatusBadge status={sale.status} failureReason={sale.failureReason} />
                       </TableCell>
-                      <TableCell className="text-center">
-                        <Badge
-                          variant={sale.status === 'paid' ? 'default' : 'secondary'}
-                          className="text-[8px] font-black uppercase tracking-tighter"
-                        >
-                          {sale.status === 'paid' ? 'Confirmado' : 'Pendiente Dep.'}
-                        </Badge>
+                      <TableCell className="text-right font-black text-primary">
+                        ${sale.totalVenta.toLocaleString()}
                       </TableCell>
-                      <TableCell className="text-center font-medium">${sale.totalVenta.toLocaleString()}</TableCell>
-                      <TableCell className="text-right pr-8">
-                        <span className={cn(
-                          'text-sm font-black tracking-tighter',
-                          sale.status === 'paid' ? 'text-muted-foreground line-through opacity-50' : 'text-primary'
-                        )}>
-                          ${sale.totalDeposito.toLocaleString()}
-                        </span>
+                      <TableCell className="text-right font-bold text-orange-600 pr-6">
+                        ${sale.totalComision.toLocaleString()}
                       </TableCell>
                     </TableRow>
-                  ))}
-                  {periodData.sales.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-center py-20 text-muted-foreground italic text-sm">
-                        No hay ventas registradas en este periodo.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Sidebar: datos de depósito + historial de reportes */}
-        <div className="lg:col-span-4 space-y-8">
-          <Card className="border-none shadow-xl bg-white rounded-[2rem] overflow-hidden sticky top-8">
-            <CardHeader className="bg-muted/30 p-8 border-b">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">
-                  Datos de Depósito
-                </CardTitle>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-10 w-10 text-primary hover:bg-primary/10 rounded-xl"
-                  onClick={handleCopyInfo}
-                >
-                  <Copy className="w-5 h-5" />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="p-8 space-y-6">
-              <div className="bg-primary/5 p-6 rounded-3xl border-2 border-dashed border-primary/20">
-                <pre className="whitespace-pre-wrap font-sans text-sm text-primary font-black leading-relaxed">
-                  {paymentInfo}
-                </pre>
-              </div>
-              <div className="p-5 bg-orange-50 border border-orange-100 rounded-2xl flex items-start gap-3">
-                <AlertCircle className="w-5 h-5 text-orange-500 shrink-0 mt-0.5" />
-                <p className="text-[10px] text-orange-800 leading-tight font-bold uppercase">
-                  Recuerda subir tu ticket. El administrador validará el pago para limpiar tu saldo de la semana.
-                </p>
-              </div>
-
-              {/* Historial de reportes enviados */}
-              <div className="space-y-4 pt-4">
-                <h4 className="text-[10px] font-black uppercase text-muted-foreground tracking-widest">
-                  Historial de Reportes
-                </h4>
-                <div className="space-y-3">
-                  {mySettlements.slice().reverse().slice(0, 5).map((s) => (
-                    <div
-                      key={s.id}
-                      className="p-4 bg-muted/20 rounded-2xl border border-muted/10 space-y-2"
-                    >
-                      <div className="flex items-center justify-between">
-                        <p className="text-[9px] font-black text-muted-foreground uppercase">{s.weekRange}</p>
-                        <Badge
-                          variant={s.status === 'confirmed' ? 'default' : 'secondary'}
-                          className={cn(
-                            'text-[8px] font-black uppercase tracking-tighter',
-                            s.status === 'reported' ? 'bg-orange-100 text-orange-700' : ''
-                          )}
-                        >
-                          {s.status === 'confirmed' ? 'Validado' : s.status === 'reported' ? 'Validando' : 'Pendiente'}
-                        </Badge>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-black text-primary">${s.totalDeposito.toLocaleString()}</p>
-                        {s.reportedAt && (
-                          <p className="text-[8px] text-muted-foreground">
-                            {new Date(s.reportedAt).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })}
-                          </p>
-                        )}
-                      </div>
-                      {s.reference && (
-                        <p className="text-[8px] text-muted-foreground truncate">Ref: {s.reference}</p>
-                      )}
-                    </div>
-                  ))}
-                  {mySettlements.length === 0 && (
-                    <p className="text-[10px] text-muted-foreground italic text-center py-4">
-                      Aún no has enviado reportes de corte.
-                    </p>
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

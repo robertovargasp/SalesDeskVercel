@@ -12,13 +12,14 @@ import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { 
-  CheckCircle2, 
+import { applyDateFilter, DateRangeFilter, DATE_FILTER_LABELS } from '@/lib/date-filters';
+import {
+  CheckCircle2,
   Truck, 
   Phone, 
   MapPin, 
   User, 
-  DollarSign, 
+  DollarSign, TrendingUp,
   Package, 
   ShoppingCart, 
   ArrowLeft,
@@ -32,9 +33,13 @@ import {
   Camera,
   Maximize2,
   CalendarDays,
-  MessageSquare
+  MessageSquare,
+  SlidersHorizontal,
+  X,
+  Trash2
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
 import { SaleStatus } from '@/lib/types';
@@ -47,8 +52,16 @@ const STEPS = [
   { id: 'delivered', label: 'Entregado', icon: Package },
 ];
 
+const STATUS_FILTER_OPTIONS = [
+  { value: 'en_ruta',    label: 'En Ruta',    statuses: ['accepted', 'contacting', 'scheduled', 'in_transit'] },
+  { value: 'completada', label: 'Completada', statuses: ['delivered', 'delivery_confirmed'] },
+  { value: 'liquidada',  label: 'Liquidada',  statuses: ['paid'] },
+  { value: 'cancelada',  label: 'Cancelada',  statuses: ['cancelled'] },
+  { value: 'fallida',    label: 'Fallida',    statuses: ['delivery_failed'] },
+];
+
 export default function SellerSalesPage() {
-  const { currentUser, users, sales, products, updateSaleStatus, assignDeliveryPerson } = useStore();
+  const { currentUser, users, sales, products, updateSaleStatus, assignDeliveryPerson, deleteSale } = useStore();
   const deliveryPersons = users.filter(u => u.role === 'delivery');
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
@@ -57,6 +70,14 @@ export default function SellerSalesPage() {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const [scheduleData, setScheduleData] = useState({ date: '', time: '' });
   const [rejectionNote, setRejectionNote] = useState('');
+  const [filterCity, setFilterCity] = useState('all');
+  const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
+  const [filterDelivery, setFilterDelivery] = useState('all');
+  const [filterPeriod, setFilterPeriod] = useState<DateRangeFilter | 'all'>('all');
+  const [filterAmountMin, setFilterAmountMin] = useState('');
+  const [filterAmountMax, setFilterAmountMax] = useState('');
+  const [filterCustomer, setFilterCustomer] = useState('');
+  const [deleteConfirmSaleId, setDeleteConfirmSaleId] = useState<string | null>(null);
 
   const mySales = sales.filter(s => s.sellerId === currentUser?.id);
   const selectedSale = mySales.find(s => s.id === selectedSaleId);
@@ -74,6 +95,67 @@ export default function SellerSalesPage() {
       total: active.length,
     };
   }, [mySales]);
+
+  const salesCities = useMemo(() =>
+    [...new Set(mySales.map(s => s.city).filter(Boolean) as string[])].sort(),
+    [mySales]
+  );
+
+  const myDeliveryPersonStats = useMemo(() => {
+    const activeIds = [...new Set(mySales.filter(s => s.deliveryPersonId).map(s => s.deliveryPersonId!))];
+    return deliveryPersons
+      .filter(dp => activeIds.includes(dp.id))
+      .map(dp => {
+        const dpSales = mySales.filter(s => s.deliveryPersonId === dp.id);
+        return {
+          person: dp,
+          activos: dpSales.filter(s => ['assigned','accepted','contacting','scheduled','in_transit'].includes(s.status)).length,
+          entregados: dpSales.filter(s => ['delivered','delivery_confirmed','paid'].includes(s.status)).length,
+          fallidos: dpSales.filter(s => s.status === 'delivery_failed').length,
+          comisionPendiente: dpSales
+            .filter(s => ['delivered','delivery_confirmed'].includes(s.status) && !s.settlementId)
+            .reduce((sum, s) => sum + s.totalComision, 0),
+        };
+      });
+  }, [mySales, deliveryPersons]);
+
+  const filteredSales = useMemo(() => {
+    const STATUS_GROUPS: Record<string, string[]> = {
+      en_ruta:    ['accepted', 'contacting', 'scheduled', 'in_transit'],
+      completada: ['delivered', 'delivery_confirmed'],
+      liquidada:  ['paid'],
+      cancelada:  ['cancelled'],
+      fallida:    ['delivery_failed'],
+    };
+    let result = filterPeriod === 'all' ? mySales : applyDateFilter(mySales, filterPeriod);
+    if (filterCity !== 'all') result = result.filter(s => s.city === filterCity);
+    if (filterStatuses.length > 0) {
+      const allowed = filterStatuses.flatMap(sv => STATUS_GROUPS[sv] ?? []);
+      result = result.filter(s => allowed.includes(s.status));
+    }
+    if (filterDelivery !== 'all') result = result.filter(s => s.deliveryPersonId === filterDelivery);
+    if (filterAmountMin) result = result.filter(s => s.totalVenta >= Number(filterAmountMin));
+    if (filterAmountMax) result = result.filter(s => s.totalVenta <= Number(filterAmountMax));
+    if (filterCustomer.trim()) result = result.filter(s => s.customerName?.toLowerCase().includes(filterCustomer.toLowerCase()));
+    return result;
+  }, [mySales, filterPeriod, filterCity, filterStatuses, filterDelivery, filterAmountMin, filterAmountMax, filterCustomer]);
+
+  const hasActiveFilters =
+    filterCity !== 'all' || filterStatuses.length > 0 || filterDelivery !== 'all' ||
+    filterPeriod !== 'all' || !!filterAmountMin || !!filterAmountMax || !!filterCustomer;
+
+  const clearFilters = () => {
+    setFilterCity('all');
+    setFilterStatuses([]);
+    setFilterDelivery('all');
+    setFilterPeriod('all');
+    setFilterAmountMin('');
+    setFilterAmountMax('');
+    setFilterCustomer('');
+  };
+
+  const toggleStatus = (value: string) =>
+    setFilterStatuses(prev => prev.includes(value) ? prev.filter(v => v !== value) : [...prev, value]);
 
   const getStepProgress = (status: SaleStatus) => {
     switch (status) {
@@ -97,11 +179,18 @@ export default function SellerSalesPage() {
       case 'scheduled': return 'Agendado';
       case 'in_transit': return 'En camino';
       case 'delivered': return 'Entregado';
-      case 'delivery_confirmed': return 'Confirmado Admin';
-      case 'paid': return 'Liquidado';
+      case 'delivery_confirmed': return 'Entregado';
+      case 'paid': return 'Completado';
       case 'cancelled': return 'Cancelado';
+      case 'delivery_failed': return 'Fallido';
       default: return status;
     }
+  };
+
+  const getSaleStatusLabel = (sale: { status: SaleStatus; failureReason?: string | null }) => {
+    if (sale.status === 'delivery_failed')
+      return sale.failureReason?.startsWith('Rechazado') ? 'Rechazado' : 'Fallido';
+    return getStatusLabel(sale.status);
   };
 
   const handleUpdateStatus = (status: SaleStatus) => {
@@ -159,7 +248,9 @@ export default function SellerSalesPage() {
     });
 
     const isPendingConfirmation = selectedSale.status === 'assigned';
-    const canReject = !['delivered', 'paid', 'cancelled'].includes(selectedSale.status);
+    // Solo el vendedor puede actuar sobre estos estados; el resto son terminales para él
+    const isSellerActionable = ['accepted', 'contacting', 'scheduled', 'in_transit'].includes(selectedSale.status);
+    const isSaleCompleted = ['delivered', 'delivery_confirmed', 'paid'].includes(selectedSale.status);
 
     return (
       <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
@@ -172,9 +263,9 @@ export default function SellerSalesPage() {
               <h1 className="text-2xl font-black">Venta #{selectedSale.id.toUpperCase()}</h1>
               <Badge variant="secondary" className={cn(
                 "border-none font-bold",
-                selectedSale.status === 'cancelled' ? "bg-red-100 text-red-700" : "bg-primary/10 text-primary"
+                ['cancelled', 'delivery_failed'].includes(selectedSale.status) ? "bg-red-100 text-red-700" : "bg-primary/10 text-primary"
               )}>
-                {getStatusLabel(selectedSale.status)}
+                {getSaleStatusLabel(selectedSale)}
               </Badge>
             </div>
             <p className="text-muted-foreground text-sm font-medium">
@@ -299,64 +390,20 @@ export default function SellerSalesPage() {
               </CardContent>
             </Card>
 
-            {!isPendingConfirmation && canReject && (
-              <Card className="border-none shadow-sm rounded-2xl">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-bold text-muted-foreground">Actualizar estado</CardTitle>
-                </CardHeader>
-                <CardContent className="flex flex-wrap gap-3">
-                  {STEPS.map((step) => {
-                    const isCompleted = STEPS.findIndex(s => s.id === step.id) <= currentStatusIdx;
-                    return (
-                      <Button
-                        key={step.id}
-                        variant={selectedSale.status === step.id ? "secondary" : "outline"}
-                        className={cn(
-                          "h-12 px-6 font-bold rounded-xl transition-all",
-                          selectedSale.status === step.id ? "bg-primary/10 text-primary hover:bg-primary/20 border-none" : 
-                          isCompleted ? "opacity-50" : "hover:bg-primary/5"
-                        )}
-                        onClick={() => handleUpdateStatus(step.id as SaleStatus)}
-                        disabled={isCompleted || step.id === 'accepted'}
-                      >
-                        {selectedSale.status === step.id && <CheckCircle2 className="w-4 h-4 mr-2" />}
-                        {step.label}
-                      </Button>
-                    );
-                  })}
-                  
-                  <Dialog open={isRejectDialogOpen} onOpenChange={setIsRejectDialogOpen}>
-                    <DialogTrigger asChild>
-                      <Button 
-                        variant="outline" 
-                        className="h-12 px-6 font-bold rounded-xl border-destructive text-destructive hover:bg-destructive/10"
-                      >
-                        <XCircle className="w-4 h-4 mr-2" /> Rechazar
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>Cancelar Venta</DialogTitle>
-                        <DialogDescription>Explica brevemente por qué no se pudo concretar la entrega.</DialogDescription>
-                      </DialogHeader>
-                      <div className="space-y-4 py-4">
-                        <div className="space-y-2">
-                          <Label className="text-xs font-bold uppercase">Notas de Cancelación</Label>
-                          <Input 
-                            placeholder="Ej: Cliente canceló, no hubo acuerdo de horario..." 
-                            value={rejectionNote}
-                            onChange={e => setRejectionNote(e.target.value)}
-                          />
-                        </div>
-                      </div>
-                      <DialogFooter>
-                        <Button variant="destructive" className="w-full h-12" onClick={confirmRejection}>Confirmar Cancelación</Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
+            {isSaleCompleted && (
+              <Card className="border-none shadow-2xl bg-green-600 text-white rounded-3xl overflow-hidden animate-in zoom-in-95 duration-500">
+                <CardContent className="p-8 flex items-center gap-6">
+                  <div className="bg-white/20 p-4 rounded-2xl shrink-0">
+                    <CheckCircle2 className="w-10 h-10" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-black tracking-tight">COMPLETADA</h2>
+                    <p className="text-white/70 text-sm mt-1">El repartidor confirmó la entrega. No se requieren más acciones del vendedor.</p>
+                  </div>
                 </CardContent>
               </Card>
             )}
+
 
             <Card className="border-none shadow-sm rounded-2xl">
               <CardHeader className="pb-2">
@@ -395,8 +442,8 @@ export default function SellerSalesPage() {
           </div>
 
           <div className="space-y-6">
-            {/* Asignar repartidor — vendedor puede asignar sus propias ventas */}
-            {!['paid', 'cancelled'].includes(selectedSale.status) && (
+            {/* Asignar repartidor — vendedor puede asignar sus propias ventas (no para pedidos ya entregados) */}
+            {isSellerActionable && (
               <Card className="border-none shadow-sm rounded-2xl">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-xs font-black text-muted-foreground uppercase tracking-widest flex items-center gap-2">
@@ -418,51 +465,6 @@ export default function SellerSalesPage() {
                     </div>
                   ) : (
                     <p className="text-xs text-muted-foreground italic mb-2">Sin repartidor asignado</p>
-                  )}
-                  {deliveryPersons.length === 0 ? (
-                    <p className="text-[11px] text-muted-foreground italic">No hay repartidores disponibles.</p>
-                  ) : (
-                    <Dialog open={isAssignDeliveryOpen} onOpenChange={setIsAssignDeliveryOpen}>
-                      <DialogTrigger asChild>
-                        <Button size="sm" variant="outline" className="w-full h-9 gap-2 font-bold text-xs border-2 border-blue-200 text-blue-600 hover:bg-blue-50 rounded-xl">
-                          <Truck className="w-3.5 h-3.5" />
-                          {selectedSale.deliveryPersonId ? 'Reasignar repartidor' : 'Asignar repartidor'}
-                        </Button>
-                      </DialogTrigger>
-                      <DialogContent className="sm:max-w-xs">
-                        <DialogHeader>
-                          <DialogTitle>Asignar Repartidor</DialogTitle>
-                        </DialogHeader>
-                        <p className="text-xs text-muted-foreground">Pedido #{selectedSale.id.toUpperCase()}</p>
-                        <div className="space-y-2 mt-2">
-                          {deliveryPersons.map(dp => {
-                            const isAssigned = selectedSale.deliveryPersonId === dp.id;
-                            return (
-                              <button
-                                key={dp.id}
-                                className={cn(
-                                  "w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-colors",
-                                  isAssigned ? "bg-primary/10 border-primary text-primary" : "hover:bg-muted/50"
-                                )}
-                                onClick={() => {
-                                  assignDeliveryPerson(selectedSale.id, dp.id);
-                                  setIsAssignDeliveryOpen(false);
-                                }}
-                              >
-                                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">
-                                  {dp.name.charAt(0)}
-                                </div>
-                                <div>
-                                  <p className="font-bold text-sm">{dp.name}</p>
-                                  <p className="text-[10px] text-muted-foreground">{dp.city}</p>
-                                </div>
-                                {isAssigned && <span className="ml-auto text-[10px] font-black text-primary">✓ Asignado</span>}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </DialogContent>
-                    </Dialog>
                   )}
                 </CardContent>
               </Card>
@@ -690,6 +692,53 @@ export default function SellerSalesPage() {
         </div>
       </div>
 
+      {/* ── Métricas ─────────────────────────────────────────────────────── */}
+      {mySales.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <Card className="border-none shadow-sm bg-primary border-l-8 border-l-primary-foreground/30">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-black text-primary-foreground/70 uppercase flex items-center gap-2">
+                <Wallet className="w-4 h-4" /> Total Entregado
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-4xl font-black text-primary-foreground tracking-tighter">
+                ${mySales.filter(s => ['delivered','paid','cancelled'].includes(s.status)).reduce((acc, s) => acc + s.totalVenta, 0).toLocaleString()}
+              </p>
+              <p className="text-[10px] text-primary-foreground/60 mt-2 font-medium">Valor de productos entregados</p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-none shadow-sm bg-white border-l-8 border-l-green-500">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-black text-muted-foreground uppercase flex items-center gap-2">
+                <Truck className="w-4 h-4 text-green-500" /> En Ruta
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-4xl font-black text-green-600 tracking-tighter">
+                ${mySales.filter(s => ['assigned','accepted','contacting','scheduled','in_transit'].includes(s.status)).reduce((acc, s) => acc + s.totalVenta, 0).toLocaleString()}
+              </p>
+              <p className="text-[10px] text-muted-foreground mt-2 font-medium">Valor de productos en camino</p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-none shadow-sm bg-white border-l-8 border-l-orange-400">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-black text-muted-foreground uppercase flex items-center gap-2">
+                <DollarSign className="w-4 h-4 text-orange-400" /> Comisiones Repartidores
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-4xl font-black text-orange-500 tracking-tighter">
+                ${mySales.filter(s => ['delivered','paid'].includes(s.status)).reduce((acc, s) => acc + s.totalComision, 0).toLocaleString()}
+              </p>
+              <p className="text-[10px] text-muted-foreground mt-2 font-medium">A pagar a repartidores</p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* ── Resumen por Ciudad ─────────────────────────────────────────── */}
       {mySales.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -725,11 +774,10 @@ export default function SellerSalesPage() {
             </CardContent>
           </Card>
 
-          {/* Tabla de ventas individuales: Neto = totalVenta − comisiónRepartidor */}
           <Card className="border-none shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-black uppercase text-muted-foreground flex items-center gap-2">
-                <DollarSign className="w-4 h-4 text-primary" /> Detalle Financiero
+                <TrendingUp className="w-4 h-4 text-primary" /> Últimas Ventas
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
@@ -737,9 +785,8 @@ export default function SellerSalesPage() {
                 <TableHeader className="bg-muted/30">
                   <TableRow>
                     <TableHead className="text-[10px] font-black uppercase pl-4">Fecha / Ciudad</TableHead>
-                    <TableHead className="text-[10px] font-black uppercase text-right">Cobrado</TableHead>
-                    <TableHead className="text-[10px] font-black uppercase text-right">Com. Rep.</TableHead>
-                    <TableHead className="text-[10px] font-black uppercase text-right pr-4">Neto</TableHead>
+                    <TableHead className="text-[10px] font-black uppercase text-right">Monto</TableHead>
+                    <TableHead className="text-[10px] font-black uppercase text-right pr-4">Com. Rep.</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -754,8 +801,7 @@ export default function SellerSalesPage() {
                         </p>
                       </TableCell>
                       <TableCell className="text-right text-xs font-bold">${sale.totalVenta.toLocaleString()}</TableCell>
-                      <TableCell className="text-right text-xs text-blue-600 font-bold">${sale.totalComision.toLocaleString()}</TableCell>
-                      <TableCell className="text-right font-black text-sm text-primary pr-4">${sale.totalDeposito.toLocaleString()}</TableCell>
+                      <TableCell className="text-right text-xs text-blue-600 font-bold pr-4">${sale.totalComision.toLocaleString()}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -765,8 +811,156 @@ export default function SellerSalesPage() {
         </div>
       )}
 
+      {/* ── Barra de filtros ─────────────────────────────────────────────── */}
+      {mySales.length > 0 && (
+        <Card className="border-none shadow-sm rounded-2xl">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <CardTitle className="text-sm font-black uppercase text-muted-foreground flex items-center gap-2">
+                <SlidersHorizontal className="w-4 h-4" /> Filtros
+              </CardTitle>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-muted-foreground">
+                  Mostrando{' '}
+                  <span className="font-black text-foreground">{filteredSales.length}</span>
+                  {' '}de{' '}
+                  <span className="font-bold">{mySales.length}</span>
+                  {' '}ventas
+                </span>
+                {hasActiveFilters && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={clearFilters}
+                    className="h-7 px-2 text-xs gap-1 text-destructive hover:text-destructive hover:bg-destructive/5"
+                  >
+                    <X className="w-3 h-3" /> Limpiar filtros
+                  </Button>
+                )}
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black uppercase text-muted-foreground">Ciudad</label>
+                <Select value={filterCity} onValueChange={setFilterCity}>
+                  <SelectTrigger className="h-9 rounded-xl border-none bg-muted/30 text-xs font-medium">
+                    <SelectValue placeholder="Todas las ciudades" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas las ciudades</SelectItem>
+                    {salesCities.map(city => (
+                      <SelectItem key={city} value={city}>{city}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black uppercase text-muted-foreground">Repartidor</label>
+                <Select value={filterDelivery} onValueChange={setFilterDelivery}>
+                  <SelectTrigger className="h-9 rounded-xl border-none bg-muted/30 text-xs font-medium">
+                    <SelectValue placeholder="Todos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    {deliveryPersons.map(dp => (
+                      <SelectItem key={dp.id} value={dp.id}>{dp.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black uppercase text-muted-foreground">Estado</label>
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  {STATUS_FILTER_OPTIONS.map(opt => (
+                    <button
+                      key={opt.value}
+                      onClick={() => toggleStatus(opt.value)}
+                      className={cn(
+                        "px-2.5 py-1 rounded-full text-[10px] font-black uppercase border transition-all",
+                        filterStatuses.includes(opt.value)
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-muted/30 text-muted-foreground border-transparent hover:border-primary/30"
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black uppercase text-muted-foreground">Cliente</label>
+                <div className="relative">
+                  <User className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar por nombre..."
+                    value={filterCustomer}
+                    onChange={e => setFilterCustomer(e.target.value)}
+                    className="h-9 rounded-xl border-none bg-muted/30 text-xs pl-8"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black uppercase text-muted-foreground">Período</label>
+                <Select value={filterPeriod} onValueChange={v => setFilterPeriod(v as DateRangeFilter | 'all')}>
+                  <SelectTrigger className="h-9 rounded-xl border-none bg-muted/30 text-xs font-medium">
+                    <SelectValue placeholder="Todo el tiempo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todo el tiempo</SelectItem>
+                    {(Object.entries(DATE_FILTER_LABELS) as [DateRangeFilter, string][]).map(([k, label]) => (
+                      <SelectItem key={k} value={k}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black uppercase text-muted-foreground">Monto de Venta ($)</label>
+                <div className="flex gap-2">
+                  <Input type="number" placeholder="Mín" value={filterAmountMin}
+                    onChange={e => setFilterAmountMin(e.target.value)}
+                    className="h-9 rounded-xl border-none bg-muted/30 text-xs" />
+                  <Input type="number" placeholder="Máx" value={filterAmountMax}
+                    onChange={e => setFilterAmountMax(e.target.value)}
+                    className="h-9 rounded-xl border-none bg-muted/30 text-xs" />
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={!!deleteConfirmSaleId} onOpenChange={open => { if (!open) setDeleteConfirmSaleId(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Eliminar venta</DialogTitle>
+            <DialogDescription>
+              ¿Eliminar la venta #{deleteConfirmSaleId?.toUpperCase()}? El stock será devuelto a tu inventario. Esta acción no se puede deshacer.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 mt-2">
+            <Button variant="outline" onClick={() => setDeleteConfirmSaleId(null)}>Cancelar</Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (deleteConfirmSaleId) {
+                  await deleteSale(deleteConfirmSaleId);
+                  setDeleteConfirmSaleId(null);
+                }
+              }}
+            >
+              <Trash2 className="w-4 h-4 mr-2" /> Eliminar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {mySales.slice().reverse().map((sale) => (
+        {filteredSales.slice().reverse().map((sale) => (
           <Card 
             key={sale.id} 
             className={cn(
@@ -786,15 +980,26 @@ export default function SellerSalesPage() {
                   <CardTitle className="text-lg font-black pt-2">#{sale.id.toUpperCase()}</CardTitle>
                   <CardDescription className="text-[10px] font-bold uppercase">{new Date(sale.createdAt).toLocaleDateString()}</CardDescription>
                 </div>
-                <Badge className={cn(
-                  "font-black text-[10px] uppercase border-none",
-                  sale.status === 'assigned' ? "bg-muted text-muted-foreground" :
-                  sale.status === 'delivered' ? "bg-primary/20 text-primary" : 
-                  sale.status === 'paid' ? "bg-green-100 text-green-700" : 
-                  sale.status === 'cancelled' ? "bg-red-100 text-red-700" : "bg-primary/10 text-primary"
-                )}>
-                  {getStatusLabel(sale.status)}
-                </Badge>
+                <div className="flex items-center gap-1.5 pt-1">
+                  <Badge className={cn(
+                    "font-black text-[10px] uppercase border-none",
+                    sale.status === 'assigned' ? "bg-muted text-muted-foreground" :
+                    ['delivered', 'delivery_confirmed', 'paid'].includes(sale.status) ? "bg-green-100 text-green-700" :
+                    ['cancelled', 'delivery_failed'].includes(sale.status) ? "bg-red-100 text-red-700" :
+                    "bg-primary/10 text-primary"
+                  )}>
+                    {getSaleStatusLabel(sale)}
+                  </Badge>
+                  {['assigned','accepted','contacting','scheduled','in_transit'].includes(sale.status) && (
+                    <button
+                      onClick={e => { e.stopPropagation(); setDeleteConfirmSaleId(sale.id); }}
+                      className="p-1.5 rounded-lg text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+                      title="Eliminar venta"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
             </CardHeader>
             <CardContent className="pt-6 space-y-4">
@@ -802,6 +1007,12 @@ export default function SellerSalesPage() {
                 <div className="bg-primary/10 p-2 rounded-lg"><User className="w-4 h-4 text-primary" /></div>
                 <span className="font-bold text-sm truncate">{sale.status === 'assigned' ? '**********' : (sale.customerName || 'Cliente')}</span>
               </div>
+              {sale.deliveryPersonId && (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Truck className="w-3.5 h-3.5 text-blue-500" />
+                  <span className="text-xs font-medium">{deliveryPersons.find(d => d.id === sale.deliveryPersonId)?.name || '—'}</span>
+                </div>
+              )}
               <div className="flex items-center justify-between border-t pt-4">
                 <div className="space-y-0.5">
                   <p className="text-[9px] font-black text-muted-foreground uppercase">Total Venta</p>
@@ -823,7 +1034,68 @@ export default function SellerSalesPage() {
              </div>
           </div>
         )}
+        {filteredSales.length === 0 && mySales.length > 0 && (
+          <div className="col-span-full py-16 text-center bg-white rounded-3xl border-2 border-dashed flex flex-col items-center gap-4">
+            <div className="bg-muted/50 p-6 rounded-full"><SlidersHorizontal className="w-10 h-10 text-muted-foreground/30" /></div>
+            <div>
+              <h3 className="text-lg font-bold">Sin resultados</h3>
+              <p className="text-sm text-muted-foreground italic">Ninguna venta coincide con los filtros aplicados.</p>
+            </div>
+          </div>
+        )}
       </div>
+
+      {myDeliveryPersonStats.length > 0 && (
+        <Card className="border-none shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-black uppercase text-muted-foreground flex items-center gap-2">
+              <Truck className="w-4 h-4 text-primary" /> Mis Repartidores
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader className="bg-muted/30">
+                <TableRow>
+                  <TableHead className="text-[10px] font-black uppercase pl-6">Repartidor</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase text-center">Activos</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase text-center">Entregados</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase text-center">Fallidos</TableHead>
+                  <TableHead className="text-[10px] font-black uppercase text-right pr-6">Com. Pendiente</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {myDeliveryPersonStats.map(({ person, activos, entregados, fallidos, comisionPendiente }) => (
+                  <TableRow key={person.id} className="h-14">
+                    <TableCell className="pl-6">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">
+                          {person.name.charAt(0)}
+                        </div>
+                        <div>
+                          <p className="font-bold text-sm">{person.name}</p>
+                          <p className="text-[10px] text-muted-foreground">{person.city}</p>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <span className="text-sm font-black text-orange-500">{activos}</span>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <span className="text-sm font-black text-green-600">{entregados}</span>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <span className={cn("text-sm font-black", fallidos > 0 ? "text-red-500" : "text-muted-foreground")}>{fallidos}</span>
+                    </TableCell>
+                    <TableCell className="text-right pr-6">
+                      <span className="font-black text-primary text-sm">${comisionPendiente.toLocaleString()}</span>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

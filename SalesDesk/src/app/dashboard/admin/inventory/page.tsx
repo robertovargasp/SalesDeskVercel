@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Send, AlertTriangle, Package, Filter, PlusCircle, Search, ArrowUpCircle, ArrowDownCircle } from 'lucide-react';
+import { Send, AlertTriangle, Package, Filter, PlusCircle, Search, ArrowUpCircle, ArrowDownCircle, MapPin } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
 import { MovementType, MovementReason } from '@/lib/types';
@@ -30,7 +30,7 @@ const REASON_LABELS: Record<MovementReason, string> = {
 };
 
 export default function InventoryPage() {
-  const { products, users, inventory, assignments, kardex, assignInventory, adjustInventory } = useStore();
+  const { products, users, inventory, assignments, kardex, kardexHasMore, assignInventory, adjustInventory, loadMoreKardex } = useStore();
   const sellers = users.filter(u => u.role === 'seller');
 
   const [selectedSellerId, setSelectedSellerId] = useState('');
@@ -140,6 +140,45 @@ export default function InventoryPage() {
 
   const [kardexSeller, setKardexSeller] = useState('all');
   const [kardexProduct, setKardexProduct] = useState('all');
+
+  // ── Por Ciudad ──────────────────────────────────────────────────────────────
+  const [selectedCity, setSelectedCity] = useState('all');
+
+  const inventoryCities = useMemo(() => {
+    const cities = new Set<string>();
+    inventory.forEach(item => {
+      const seller = users.find(u => u.id === item.sellerId);
+      if (seller?.city?.trim()) cities.add(seller.city.trim());
+    });
+    return Array.from(cities).sort();
+  }, [inventory, users]);
+
+  const cityInventoryMap = useMemo(() => {
+    return inventoryCities
+      .filter(city => selectedCity === 'all' || city === selectedCity)
+      .map(city => {
+        const sellersInCity = users.filter(u => u.city?.trim() === city && u.role === 'seller');
+        const sellerIds = new Set(sellersInCity.map(s => s.id));
+        const cityItems = inventory.filter(i => sellerIds.has(i.sellerId));
+
+        const productTotals = products
+          .map(p => ({
+            product: p,
+            total: cityItems
+              .filter(i => i.productId === p.id)
+              .reduce((sum, i) => sum + i.quantity, 0),
+          }))
+          .filter(pt => pt.total > 0);
+
+        return {
+          city,
+          productTotals,
+          sellerCount: sellersInCity.length,
+          totalUnits: productTotals.reduce((sum, pt) => sum + pt.total, 0),
+        };
+      })
+      .filter(c => c.productTotals.length > 0);
+  }, [inventoryCities, inventory, users, products, selectedCity]);
 
   const filteredKardex = useMemo(() => {
     return kardex.filter(k => {
@@ -255,6 +294,7 @@ export default function InventoryPage() {
       <Tabs defaultValue="stock">
         <TabsList className="mb-4">
           <TabsTrigger value="stock">Stock Actual</TabsTrigger>
+          <TabsTrigger value="ciudad">Por Ciudad</TabsTrigger>
           <TabsTrigger value="kardex">Kardex / Historial</TabsTrigger>
         </TabsList>
 
@@ -391,6 +431,85 @@ export default function InventoryPage() {
       </div>
         </TabsContent>
 
+        <TabsContent value="ciudad">
+          <div className="space-y-6">
+            {/* Selector de ciudad */}
+            <div className="flex items-center gap-3">
+              <MapPin className="w-4 h-4 text-primary" />
+              <Select value={selectedCity} onValueChange={setSelectedCity}>
+                <SelectTrigger className="w-56 bg-white border-none shadow-sm rounded-xl h-10">
+                  <SelectValue placeholder="Seleccionar ciudad" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas las ciudades</SelectItem>
+                  {inventoryCities.map(city => (
+                    <SelectItem key={city} value={city}>{city}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span className="text-xs text-muted-foreground">
+                {cityInventoryMap.length} ciudad{cityInventoryMap.length !== 1 ? 'es' : ''} con stock
+              </span>
+            </div>
+
+            {cityInventoryMap.length === 0 ? (
+              <div className="py-24 text-center bg-white rounded-3xl border-2 border-dashed flex flex-col items-center gap-4">
+                <div className="bg-muted/50 p-6 rounded-full">
+                  <MapPin className="w-10 h-10 text-muted-foreground/30" />
+                </div>
+                <p className="text-muted-foreground italic text-sm">Sin inventario para la ciudad seleccionada</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+                {cityInventoryMap.map(({ city, productTotals, sellerCount, totalUnits }) => (
+                  <Card key={city} className="border-none shadow-sm rounded-2xl overflow-hidden">
+                    <CardHeader className="bg-primary/5 pb-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="bg-primary/10 p-2 rounded-xl">
+                            <MapPin className="w-4 h-4 text-primary" />
+                          </div>
+                          <div>
+                            <CardTitle className="text-base font-black">{city}</CardTitle>
+                            <p className="text-[10px] text-muted-foreground">
+                              {sellerCount} vendedor{sellerCount !== 1 ? 'es' : ''}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[9px] font-black text-muted-foreground uppercase">Total</p>
+                          <p className="text-2xl font-black text-primary">{totalUnits}</p>
+                          <p className="text-[9px] text-muted-foreground">uds</p>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <div className="divide-y">
+                        {productTotals.map(({ product, total }) => (
+                          <div key={product.id} className="flex items-center justify-between px-5 py-3">
+                            <div className="flex items-center gap-2">
+                              <Package className="w-3.5 h-3.5 text-muted-foreground" />
+                              <span className="text-sm font-medium">{product.name}</span>
+                            </div>
+                            <span className={cn(
+                              "text-sm font-black px-3 py-0.5 rounded-full",
+                              total < (product.minStock ?? 4)
+                                ? "bg-red-100 text-red-700"
+                                : "bg-green-100 text-green-700"
+                            )}>
+                              {total} uds
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
+        </TabsContent>
+
         <TabsContent value="kardex">
           <Card className="border-none shadow-sm">
             <CardHeader className="pb-4">
@@ -477,6 +596,16 @@ export default function InventoryPage() {
                 </TableBody>
               </Table>
             </CardContent>
+            {kardexHasMore && (
+              <div className="flex justify-center p-4 border-t">
+                <button
+                  onClick={loadMoreKardex}
+                  className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
+                >
+                  Cargar más registros
+                </button>
+              </div>
+            )}
           </Card>
         </TabsContent>
       </Tabs>

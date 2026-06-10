@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
   CheckCircle2, Clock, Info, Pencil, FileText, Image as ImageIcon,
-  Search, CalendarDays, MapPin, Truck, ShoppingBag, TrendingUp, Users, Wallet
+  Search, CalendarDays, MapPin, Truck, ShoppingBag, TrendingUp, Users, Wallet, XCircle
 } from 'lucide-react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -22,8 +22,10 @@ import { cn } from '@/lib/utils';
 import { applyDateFilter, getDateRange, DATE_FILTER_LABELS, DateRangeFilter } from '@/lib/date-filters';
 
 export default function AdminSettlementsPage() {
-  const { settlements, users, sales, paymentInfo, updatePaymentInfo, confirmSettlement } = useStore();
+  const { settlements, users, sales, paymentInfo, updatePaymentInfo, confirmSettlement, rejectSettlement } = useStore();
   const [isEditingInfo, setIsEditingInfo] = useState(false);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [rejectionReason, setRejectionReason] = useState('');
   const [tempInfo, setTempInfo] = useState(paymentInfo);
   const [filterSeller, setFilterSeller] = useState('');
   const [filterDelivery, setFilterDelivery] = useState('all');
@@ -62,7 +64,10 @@ export default function AdminSettlementsPage() {
   const summary = useMemo(() => {
     const totalVenta = filteredSales.reduce((acc, s) => acc + s.totalVenta, 0);
     const totalComision = filteredSales.reduce((acc, s) => acc + s.totalComision, 0);
-    return { totalVenta, totalComision, ventaNeta: totalVenta - totalComision };
+    const aRecibir = filteredSales
+      .filter(s => ['delivered', 'pending_return'].includes(s.status) && !s.settlementId)
+      .reduce((acc, s) => acc + s.totalDeposito, 0);
+    return { totalVenta, totalComision, ventaNeta: totalVenta - totalComision, aRecibir };
   }, [filteredSales]);
 
   // Desglose por ciudad desde ventas filtradas
@@ -92,7 +97,7 @@ export default function AdminSettlementsPage() {
       const seller = users.find(u => u.id === s.sellerId);
       if (!seller?.name.toLowerCase().includes(filterSeller.toLowerCase())) return false;
       if (filterDelivery !== 'all' || filterCity !== 'all') {
-        const hasMatch = filteredSales.some(sale => sale.sellerId === s.sellerId);
+        const hasMatch = filteredSales.some(sale => sale.settlementId === s.id);
         if (!hasMatch) return false;
       }
       return true;
@@ -104,7 +109,7 @@ export default function AdminSettlementsPage() {
     setIsEditingInfo(false);
   };
 
-  const pendingCount = settlements.filter(s => s.status === 'reported').length;
+  const pendingCount = filteredSettlements.filter(s => s.status === 'reported').length;
 
   return (
     <div className="space-y-8">
@@ -245,9 +250,9 @@ export default function AdminSettlementsPage() {
           </CardHeader>
           <CardContent>
             <p className="text-4xl font-black tracking-tighter text-white">
-              ${summary.ventaNeta.toLocaleString()}
+              ${summary.aRecibir.toLocaleString()}
             </p>
-            <p className="text-[9px] text-primary-foreground/60 mt-1 italic">Total a recibir de vendedores</p>
+            <p className="text-[9px] text-primary-foreground/60 mt-1 italic">Pendiente de recibir de repartidores</p>
           </CardContent>
         </Card>
       </div>
@@ -469,24 +474,38 @@ export default function AdminSettlementsPage() {
                         </TableCell>
                         <TableCell>
                           <Badge
-                            variant={s.status === 'confirmed' ? 'default' : 'secondary'}
                             className={cn(
-                              'text-[9px] uppercase font-black tracking-widest px-2 h-5',
-                              s.status === 'reported' ? 'bg-orange-100 text-orange-700' : ''
+                              'text-[9px] uppercase font-black tracking-widest px-2 h-5 border-none',
+                              s.status === 'reported'  ? 'bg-orange-100 text-orange-700' :
+                              s.status === 'confirmed' ? 'bg-green-100 text-green-700' :
+                              s.status === 'rejected'  ? 'bg-red-100 text-red-700' :
+                              'bg-muted text-muted-foreground'
                             )}
                           >
-                            {s.status === 'reported' ? 'Por Validar' : 'Confirmado'}
+                            {s.status === 'reported'  ? 'Por Validar' :
+                             s.status === 'confirmed' ? 'Confirmado' :
+                             s.status === 'rejected'  ? 'Rechazado' : s.status}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">
                           {s.status === 'reported' && (
-                            <Button
-                              size="sm"
-                              className="h-8 gap-1.5 text-[11px] font-bold shadow-sm"
-                              onClick={() => confirmSettlement(s.id)}
-                            >
-                              <CheckCircle2 className="w-3.5 h-3.5" /> Aprobar
-                            </Button>
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 gap-1.5 text-[11px] font-bold border-red-200 text-red-600 hover:bg-red-50"
+                                onClick={() => { setRejectingId(s.id); setRejectionReason(''); }}
+                              >
+                                <XCircle className="w-3.5 h-3.5" /> Rechazar
+                              </Button>
+                              <Button
+                                size="sm"
+                                className="h-8 gap-1.5 text-[11px] font-bold shadow-sm"
+                                onClick={() => confirmSettlement(s.id)}
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Aprobar
+                              </Button>
+                            </div>
                           )}
                           {s.status === 'confirmed' && (
                             <div className="flex flex-col items-end">
@@ -516,6 +535,38 @@ export default function AdminSettlementsPage() {
           </Card>
         </div>
       </div>
+
+      {/* Modal de rechazo */}
+      <Dialog open={!!rejectingId} onOpenChange={open => { if (!open) setRejectingId(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Rechazar liquidación</DialogTitle>
+            <DialogDescription>El repartidor verá este motivo y los pedidos quedarán disponibles nuevamente.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Textarea
+              placeholder="Motivo del rechazo (obligatorio)"
+              value={rejectionReason}
+              onChange={e => setRejectionReason(e.target.value)}
+              className="min-h-[100px] text-sm"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRejectingId(null)}>Cancelar</Button>
+            <Button
+              variant="destructive"
+              disabled={!rejectionReason.trim()}
+              onClick={async () => {
+                if (!rejectingId) return;
+                await rejectSettlement(rejectingId, rejectionReason.trim());
+                setRejectingId(null);
+              }}
+            >
+              <XCircle className="w-4 h-4 mr-2" /> Confirmar rechazo
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

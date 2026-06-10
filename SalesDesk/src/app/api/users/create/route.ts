@@ -26,15 +26,14 @@ export async function POST(request: Request) {
   }
 
   // Verificar rol admin en DB — no confiar en el cliente
-  const { data: profile } = await supabaseAuth
+  const { data: profile, error: profileError } = await supabaseAuth
     .from('profiles')
     .select('role')
     .eq('id', user.id)
     .single();
 
-  if (profile?.role !== 'admin') {
-    return Response.json({ error: 'No autorizado' }, { status: 403 });
-  }
+  if (profileError) return Response.json({ error: 'Error al verificar permisos' }, { status: 500 });
+  if (profile?.role !== 'admin') return Response.json({ error: 'No autorizado' }, { status: 403 });
 
   try {
     const { email, password } = await request.json();

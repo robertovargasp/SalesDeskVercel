@@ -31,7 +31,7 @@ const sellerLinks = [
   { label: 'Mi Inventario',     href: '/dashboard/seller/inventory',   icon: Package },
   { label: 'Ventas',            href: '/dashboard/admin/sales',        icon: TrendingUp },
   { label: 'Paquetería',        href: '/dashboard/admin/delivery',     icon: Truck },
-  { label: 'Mis Liquidaciones', href: '/dashboard/seller/settlements', icon: Receipt },
+  { label: 'Mis Reportes', href: '/dashboard/seller/settlements', icon: Receipt },
 ];
 
 const deliveryLinks = [

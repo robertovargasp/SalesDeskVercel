@@ -67,7 +67,7 @@ function mapOrderEvent(row: any): SaleEvent {
   return {
     date: row.created_at,
     type: row.type,
-    userId: row.user_id ?? '',
+    userId: row.user_id ?? null,
     userName: row.user_name ?? '',
     note: row.note ?? undefined,
   };
@@ -117,6 +117,7 @@ export function mapSettlement(row: any): WeeklySettlement {
     reference: row.reference ?? undefined,
     reportedAt: row.reported_at ?? undefined,
     confirmedAt: row.confirmed_at ?? undefined,
+    rejectionReason: row.rejection_reason ?? undefined,
     createdAt: row.created_at,
   };
 }
@@ -131,7 +132,7 @@ export function mapKardex(row: any): KardexEntry {
     quantity: row.quantity,
     balanceBefore: row.balance_before,
     balanceAfter: row.balance_after,
-    userId: row.user_id ?? '',
+    userId: row.user_id ?? null,
     userName: row.user_name ?? '',
     createdAt: row.created_at,
     saleId: row.order_id ?? undefined,

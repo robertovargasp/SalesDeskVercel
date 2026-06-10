@@ -14,8 +14,8 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import {
   Plus, Send, Phone, MapPin, User, DollarSign, Wallet,
   CheckCircle2, Truck, ShoppingCart, TrendingUp,
-  XCircle, Link, Trash2, Handshake, Clock, Camera,
-  Image as ImageIcon, CalendarDays, Package, AlertTriangle, RotateCcw
+  XCircle, Link, Trash2, Handshake, Clock, Camera, X,
+  CalendarDays, Package, AlertTriangle
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
@@ -32,8 +32,40 @@ const STATUS_STEPS = [
   { id: 'delivered', label: 'Entregado', icon: Package },
 ];
 
+const SALE_STATUS_BADGE_CONFIG: Record<string, { label: string; color: string }> = {
+  assigned:           { label: 'En Ruta',    color: 'bg-muted text-muted-foreground' },
+  accepted:           { label: 'En Ruta',    color: 'bg-muted text-muted-foreground' },
+  contacting:         { label: 'En Ruta',    color: 'bg-muted text-muted-foreground' },
+  scheduled:          { label: 'En Ruta',    color: 'bg-muted text-muted-foreground' },
+  in_transit:         { label: 'En Camino',  color: 'bg-blue-100 text-blue-700' },
+  delivered:          { label: 'Entregado',  color: 'bg-green-100 text-green-700' },
+  delivery_confirmed: { label: 'Entregado',  color: 'bg-green-100 text-green-700' },
+  paid:               { label: 'Liquidado',  color: 'bg-emerald-100 text-emerald-700' },
+  cancelled:          { label: 'Cancelado',  color: 'bg-red-100 text-red-600' },
+  delivery_failed:    { label: 'Fallido',    color: 'bg-red-100 text-red-800' },
+  pending_return:     { label: 'Devolución', color: 'bg-orange-100 text-orange-700' },
+};
+
+const FINAL_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
+  paid:               { label: 'Liquidado',   color: 'bg-primary/10 text-primary' },
+  cancelled:          { label: 'Cancelado',   color: 'bg-red-100 text-red-700' },
+  delivery_failed:    { label: 'Fallido',     color: 'bg-red-100 text-red-800' },
+  delivered:          { label: 'Entregado',   color: 'bg-green-100 text-green-700' },
+  delivery_confirmed: { label: 'Confirmado',  color: 'bg-green-100 text-green-700' },
+  pending_return:     { label: 'Devolución',  color: 'bg-orange-100 text-orange-700' },
+};
+const FINAL_STATUSES = Object.keys(FINAL_STATUS_CONFIG);
+
+const ADMIN_STATUS_GROUPS: Record<string, string[]> = {
+  en_ruta:    ['assigned', 'accepted', 'contacting', 'scheduled', 'in_transit'],
+  completada: ['delivered', 'delivery_confirmed'],
+  liquidada:  ['paid'],
+  cancelada:  ['cancelled'],
+  fallida:    ['delivery_failed', 'pending_return'],
+};
+
 export default function SalesPage() {
-  const { currentUser, products, users, sales, inventory, registerMultiSale, updateSaleStatus, deleteSale, assignDeliveryPerson, cancelFailedOrder, retryDelivery } = useStore();
+  const { currentUser, products, users, sales, inventory, registerMultiSale, updateSaleStatus, deleteSale, assignDeliveryPerson } = useStore();
 
   // Calcula el tiempo restante de las 48h desde que un pedido falló
   const get48hCountdown = (failedAt?: string): { expired: boolean; label: string } => {
@@ -51,8 +83,11 @@ export default function SalesPage() {
   const [isOpen, setIsOpen] = useState(false);
   const [assigningDeliveryForSaleId, setAssigningDeliveryForSaleId] = useState<string | null>(null);
   const [dateFilter, setDateFilter] = useState<DateRangeFilter>('month');
-  // Estado para tracker interactivo del admin
-  const [pendingStep, setPendingStep] = useState<{ saleId: string; status: SaleStatus; label: string } | null>(null);
+  const [filterCity, setFilterCity] = useState('all');
+  const [filterDelivery, setFilterDelivery] = useState('all');
+  const [filterStatusGroup, setFilterStatusGroup] = useState('all');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
 
   const [header, setHeader] = useState({
     sellerId: '',
@@ -116,6 +151,21 @@ export default function SalesPage() {
     }
   };
 
+  const stockErrors = useMemo(() => {
+    if (!header.sellerId) return {} as Record<string, { available: number; requested: number }>;
+    const errors: Record<string, { available: number; requested: number }> = {};
+    Object.entries(batchItems).forEach(([productId, data]) => {
+      const qty = parseInt(data.quantity);
+      if (qty > 0) {
+        const available = inventory.find(i => i.productId === productId && i.sellerId === header.sellerId)?.quantity ?? 0;
+        if (qty > available) errors[productId] = { available, requested: qty };
+      }
+    });
+    return errors;
+  }, [batchItems, header.sellerId, inventory]);
+
+  const hasStockError = Object.keys(stockErrors).length > 0;
+
   const totals = useMemo(() => {
     let calculatedVenta = 0;
     let calculatedComision = 0;
@@ -175,6 +225,11 @@ export default function SalesPage() {
       return;
     }
 
+    if (hasStockError) {
+      toast({ variant: "destructive", title: "Stock insuficiente", description: "Corrige las cantidades marcadas en rojo antes de continuar." });
+      return;
+    }
+
     registerMultiSale(
       header.sellerId,
       header.city,
@@ -197,29 +252,55 @@ export default function SalesPage() {
     setPhotoBase64(undefined);
   };
 
+  const salesInPeriod = useMemo(() => {
+    const start = customStart ? new Date(customStart) : undefined;
+    const end = customEnd ? new Date(customEnd) : undefined;
+    return applyDateFilter(sales, dateFilter, start, end);
+  }, [sales, dateFilter, customStart, customEnd]);
+
+  const allCities = useMemo(() =>
+    [...new Set(sales.map(s => s.city).filter(Boolean) as string[])].sort(),
+    [sales]
+  );
+
+  const filteredAdminSales = useMemo(() => {
+    let result = salesInPeriod;
+    if (filterCity !== 'all') result = result.filter(s => s.city === filterCity);
+    if (filterDelivery !== 'all') result = result.filter(s => s.deliveryPersonId === filterDelivery);
+    if (filterStatusGroup !== 'all') {
+      const allowed = ADMIN_STATUS_GROUPS[filterStatusGroup] ?? [];
+      result = result.filter(s => allowed.includes(s.status));
+    }
+    return result;
+  }, [salesInPeriod, filterCity, filterDelivery, filterStatusGroup]);
+
+  const hasAdminFilters = filterCity !== 'all' || filterDelivery !== 'all' || filterStatusGroup !== 'all';
+
+  const clearAdminFilters = () => {
+    setFilterCity('all');
+    setFilterDelivery('all');
+    setFilterStatusGroup('all');
+  };
+
   const salesBySeller = useMemo(() => {
-    const filteredByDate = applyDateFilter(sales, dateFilter);
-    const sellerIds = Array.from(new Set(filteredByDate.map(s => s.sellerId)));
+    const sellerIds = Array.from(new Set(filteredAdminSales.map(s => s.sellerId)));
 
     return sellerIds.map(sid => {
       const seller = users.find(u => u.id === sid);
-      const sellerSales = filteredByDate.filter(s => s.sellerId === sid);
+      const sellerSales = filteredAdminSales.filter(s => s.sellerId === sid);
       const pendingDeposit = sellerSales
         .filter(s => s.status === 'delivery_confirmed')
         .reduce((acc, s) => acc + s.totalDeposito, 0);
-      
+
       return {
         seller: seller || { name: `Vendedor Eliminado`, city: 'N/A', id: sid },
         sales: sellerSales,
         pendingDeposit
       };
     }).sort((a, b) => b.pendingDeposit - a.pendingDeposit);
-  }, [sales, users]);
+  }, [filteredAdminSales, users]);
 
-  // Tracker interactivo: admin/seller pueden hacer clic en cada paso
   const StatusTimeline = ({ status, sale }: { status: SaleStatus; sale?: typeof sales[0] }) => {
-    const canInteract = currentUser?.role === 'admin' || currentUser?.role === 'seller';
-
     if (status === 'cancelled') {
       return (
         <div className="flex items-center gap-2 text-red-500 bg-red-50 px-3 py-1 rounded-full border border-red-100">
@@ -281,26 +362,19 @@ export default function SalesPage() {
 
           return (
             <div key={step.id} className="flex items-center">
-              <button
-                type="button"
-                disabled={!canInteract || !sale}
-                onClick={() => {
-                  if (!canInteract || !sale) return;
-                  setPendingStep({ saleId: sale.id, status: step.id as SaleStatus, label: step.label });
-                }}
-                title={canInteract ? `Cambiar a: ${step.label}` : step.label}
+              <div
+                title={step.label}
                 className={cn(
-                  "w-7 h-7 rounded-full flex items-center justify-center transition-all",
+                  "w-7 h-7 rounded-full flex items-center justify-center",
                   isCurrent
                     ? "bg-primary text-primary-foreground scale-110 shadow-lg"
                     : isPast
                     ? "bg-primary/20 text-primary"
-                    : "bg-muted text-muted-foreground/30",
-                  canInteract && "hover:ring-2 hover:ring-primary/50 hover:scale-110 cursor-pointer"
+                    : "bg-muted text-muted-foreground/30"
                 )}
               >
                 <Icon className={cn("w-3.5 h-3.5", isCurrent && step.id === 'in_transit' ? "animate-bounce" : "")} />
-              </button>
+              </div>
               {idx < STATUS_STEPS.length - 1 && (
                 <div className={cn("w-3 h-0.5", isPast ? "bg-primary/20" : "bg-muted")} />
               )}
@@ -313,29 +387,6 @@ export default function SalesPage() {
 
   return (
     <div className="space-y-8">
-      {/* Diálogo de confirmación del tracker interactivo */}
-      <Dialog open={!!pendingStep} onOpenChange={(open) => { if (!open) setPendingStep(null); }}>
-        <DialogContent className="sm:max-w-xs">
-          <DialogHeader>
-            <DialogTitle>Cambiar estado del pedido</DialogTitle>
-            <DialogDescription>
-              ¿Cambiar el estado a <span className="font-black text-primary">{pendingStep?.label}</span>?
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2 mt-2">
-            <Button variant="outline" className="flex-1" onClick={() => setPendingStep(null)}>Cancelar</Button>
-            <Button className="flex-1" onClick={() => {
-              if (pendingStep) {
-                updateSaleStatus(pendingStep.saleId, pendingStep.status);
-                setPendingStep(null);
-              }
-            }}>
-              Confirmar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-extrabold tracking-tight">Ventas y Cobranza</h1>
@@ -352,6 +403,23 @@ export default function SalesPage() {
               ))}
             </SelectContent>
           </Select>
+          {dateFilter === 'custom' && (
+            <>
+              <Input
+                type="date"
+                value={customStart}
+                onChange={e => setCustomStart(e.target.value)}
+                className="w-36 h-10 text-sm bg-card border shadow-sm"
+              />
+              <span className="text-muted-foreground text-sm font-medium">—</span>
+              <Input
+                type="date"
+                value={customEnd}
+                onChange={e => setCustomEnd(e.target.value)}
+                className="w-36 h-10 text-sm bg-card border shadow-sm"
+              />
+            </>
+          )}
         <Dialog open={isOpen} onOpenChange={(val) => { setIsOpen(val); if (val) initializeBatchItems(header.sellerId); }}>
           <DialogTrigger asChild>
             <Button className="gap-2 h-12 px-6 shadow-xl bg-primary hover:bg-primary/90 transition-all">
@@ -477,11 +545,19 @@ export default function SalesPage() {
                                 min="0"
                                 max={stock}
                                 placeholder="0"
-                                className="h-9 w-16 mx-auto text-center text-xs font-bold border-none bg-muted/30 focus:bg-white focus:ring-1 focus:ring-primary"
+                                className={cn(
+                                  "h-9 w-16 mx-auto text-center text-xs font-bold border-none bg-muted/30 focus:bg-white focus:ring-1 focus:ring-primary",
+                                  stockErrors[p.id] && "ring-1 ring-destructive bg-destructive/5"
+                                )}
                                 value={itemData.quantity}
                                 onChange={(e) => handleBatchUpdate(p.id, 'quantity', e.target.value)}
                                 disabled={!header.sellerId || stock === 0}
                               />
+                              {stockErrors[p.id] && (
+                                <p className="text-[10px] text-destructive font-bold mt-0.5 text-center">
+                                  Máx. {stockErrors[p.id].available}
+                                </p>
+                              )}
                             </TableCell>
                             <TableCell className="py-2 text-right pr-6">
                               <div className="flex items-center justify-end gap-1">
@@ -564,7 +640,7 @@ export default function SalesPage() {
                 </div>
               )}
 
-              <Button onClick={handleRegister} className="w-full gap-3 h-16 text-xl font-black shadow-2xl rounded-2xl transition-all hover:scale-[1.02]" disabled={totals.itemsToRegister.length === 0 || !header.sellerId}>
+              <Button onClick={handleRegister} className="w-full gap-3 h-16 text-xl font-black shadow-2xl rounded-2xl transition-all hover:scale-[1.02]" disabled={totals.itemsToRegister.length === 0 || !header.sellerId || hasStockError}>
                 <Send className="w-6 h-6" /> Registrar y Finalizar Venta
               </Button>
             </div>
@@ -577,44 +653,100 @@ export default function SalesPage() {
         <Card className="border-none shadow-sm bg-primary border-l-8 border-l-primary-foreground/30">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-black text-primary-foreground/70 uppercase flex items-center gap-2">
-              <Wallet className="w-4 h-4" /> Pendiente de Cobro
+              <Wallet className="w-4 h-4" /> Total Entregado
             </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-4xl font-black text-primary-foreground tracking-tighter">
-              ${sales.filter(s => s.status === 'delivery_confirmed').reduce((acc, s) => acc + s.totalDeposito, 0).toLocaleString()}
+              ${salesInPeriod.filter(s => ['delivered','paid','cancelled'].includes(s.status)).reduce((acc, s) => acc + s.totalVenta, 0).toLocaleString()}
             </p>
-            <p className="text-[10px] text-primary-foreground/60 mt-2 font-medium">Dinero en manos de vendedores</p>
+            <p className="text-[10px] text-primary-foreground/60 mt-2 font-medium">Valor de productos entregados</p>
           </CardContent>
         </Card>
-        
+
         <Card className="border-none shadow-sm bg-white border-l-8 border-l-green-500">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-black text-muted-foreground uppercase flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-green-500" /> Total Liquidado
+              <Truck className="w-4 h-4 text-green-500" /> En Ruta
             </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-4xl font-black text-green-600 tracking-tighter">
-              ${sales.filter(s => s.status === 'paid').reduce((acc, s) => acc + s.totalDeposito, 0).toLocaleString()}
+              ${salesInPeriod.filter(s => ['assigned','accepted','contacting','scheduled','in_transit'].includes(s.status)).reduce((acc, s) => acc + s.totalVenta, 0).toLocaleString()}
             </p>
-            <p className="text-[10px] text-muted-foreground mt-2 font-medium">Ingresado a caja central</p>
+            <p className="text-[10px] text-muted-foreground mt-2 font-medium">Valor de productos en camino</p>
           </CardContent>
         </Card>
 
         <Card className="border-none shadow-sm bg-white border-l-8 border-l-orange-400">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-black text-muted-foreground uppercase flex items-center gap-2">
-              <Truck className="w-4 h-4 text-orange-400" /> Entregas en Proceso
+              <DollarSign className="w-4 h-4 text-orange-400" /> Comisiones Repartidores
             </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-4xl font-black text-orange-500 tracking-tighter">
-              {sales.filter(s => s.status !== 'paid' && s.status !== 'cancelled').length}
+              ${salesInPeriod.filter(s => ['delivered','paid'].includes(s.status)).reduce((acc, s) => acc + s.totalComision, 0).toLocaleString()}
             </p>
-            <p className="text-[10px] text-muted-foreground mt-2 font-medium">Flujo logístico activo</p>
+            <p className="text-[10px] text-muted-foreground mt-2 font-medium">A pagar a repartidores</p>
           </CardContent>
         </Card>
+      </div>
+
+      {/* ── Filtros adicionales ──────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <Select value={filterCity} onValueChange={setFilterCity}>
+            <SelectTrigger className="h-9 w-44 bg-card border shadow-sm text-xs">
+              <SelectValue placeholder="Todas las ciudades" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas las ciudades</SelectItem>
+              {allCities.map(city => (
+                <SelectItem key={city} value={city}>{city}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={filterDelivery} onValueChange={setFilterDelivery}>
+            <SelectTrigger className="h-9 w-44 bg-card border shadow-sm text-xs">
+              <SelectValue placeholder="Todos los repartidores" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los repartidores</SelectItem>
+              {deliveryPersons.map(dp => (
+                <SelectItem key={dp.id} value={dp.id}>{dp.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={filterStatusGroup} onValueChange={setFilterStatusGroup}>
+            <SelectTrigger className="h-9 w-40 bg-card border shadow-sm text-xs">
+              <SelectValue placeholder="Todos los estados" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los estados</SelectItem>
+              <SelectItem value="en_ruta">En Ruta</SelectItem>
+              <SelectItem value="completada">Completada</SelectItem>
+              <SelectItem value="liquidada">Liquidada</SelectItem>
+              <SelectItem value="cancelada">Cancelada</SelectItem>
+              <SelectItem value="fallida">Fallida</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-center gap-3 ml-auto">
+          <span className="text-xs text-muted-foreground">
+            Mostrando{' '}
+            <span className="font-black text-foreground">{filteredAdminSales.length}</span>
+            {' '}de{' '}
+            <span className="font-bold">{salesInPeriod.length}</span>
+            {' '}ventas
+          </span>
+          {hasAdminFilters && (
+            <Button variant="ghost" size="sm" onClick={clearAdminFilters}
+              className="h-7 px-2 text-xs gap-1 text-destructive hover:text-destructive hover:bg-destructive/5">
+              <X className="w-3 h-3" /> Limpiar
+            </Button>
+          )}
+        </div>
       </div>
 
       <Card className="border-none shadow-md overflow-hidden bg-white/50 backdrop-blur-sm">
@@ -630,28 +762,63 @@ export default function SalesPage() {
             {salesBySeller.map((group) => (
               <AccordionItem key={group.seller.id} value={group.seller.id} className="border-none px-8 hover:bg-white/40 transition-colors">
                 <AccordionTrigger className="hover:no-underline py-6">
-                  <div className="flex items-center justify-between w-full pr-6">
-                    <div className="flex items-center gap-5">
-                      <div className="w-12 h-12 rounded-2xl bg-primary shadow-lg shadow-primary/20 flex items-center justify-center text-primary-foreground text-xl font-black">
-                        {group.seller.name.charAt(0)}
+                  {(() => {
+                    const enRutaCount = group.sales.filter(s => ['assigned','accepted','contacting','scheduled','in_transit'].includes(s.status)).length;
+                    const entregadosCount = group.sales.filter(s => ['delivered','delivery_confirmed','paid'].includes(s.status)).length;
+                    const fallidosCount = group.sales.filter(s => ['cancelled','delivery_failed'].includes(s.status)).length;
+                    return (
+                      <div className="flex items-center justify-between w-full pr-6">
+                        <div className="flex items-center gap-5">
+                          <div className="w-12 h-12 rounded-2xl bg-primary shadow-lg shadow-primary/20 flex items-center justify-center text-primary-foreground text-xl font-black">
+                            {group.seller.name.charAt(0)}
+                          </div>
+                          <div className="text-left space-y-1">
+                            <p className="font-black text-base text-foreground tracking-tight">{group.seller.name}</p>
+                            <Badge variant="secondary" className="text-[10px] font-bold px-2 py-0 h-5 bg-muted text-muted-foreground">
+                              {group.sales.length} ventas
+                            </Badge>
+                          </div>
+                        </div>
+                        {isSeller ? (
+                          <div className="flex items-center gap-2 flex-wrap justify-end">
+                            {enRutaCount > 0 && (
+                              <Badge className="text-[10px] font-bold border-none bg-muted text-muted-foreground">
+                                {enRutaCount} en ruta
+                              </Badge>
+                            )}
+                            {entregadosCount > 0 && (
+                              <Badge className="text-[10px] font-bold border-none bg-green-100 text-green-700">
+                                {entregadosCount} entregados
+                              </Badge>
+                            )}
+                            {fallidosCount > 0 && (
+                              <Badge className="text-[10px] font-bold border-none bg-red-100 text-red-700">
+                                {fallidosCount} fallidos
+                              </Badge>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 flex-wrap justify-end">
+                            {enRutaCount > 0 && (
+                              <Badge className="text-[10px] font-bold border-none bg-muted text-muted-foreground">
+                                {enRutaCount} en ruta
+                              </Badge>
+                            )}
+                            {entregadosCount > 0 && (
+                              <Badge className="text-[10px] font-bold border-none bg-green-100 text-green-700">
+                                {entregadosCount} entregados
+                              </Badge>
+                            )}
+                            {fallidosCount > 0 && (
+                              <Badge className="text-[10px] font-bold border-none bg-red-100 text-red-700">
+                                {fallidosCount} fallidos
+                              </Badge>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <div className="text-left space-y-1">
-                        <p className="font-black text-base text-foreground tracking-tight">{group.seller.name}</p>
-                        <Badge variant="secondary" className="text-[10px] font-bold px-2 py-0 h-5 bg-muted text-muted-foreground">
-                          {group.sales.length} ventas
-                        </Badge>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-[10px] text-muted-foreground uppercase font-black tracking-widest italic mb-1">Por Liquidar</p>
-                      <div className={cn(
-                        "text-2xl font-black tracking-tighter px-4 py-1 rounded-xl",
-                        group.pendingDeposit > 0 ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
-                      )}>
-                        ${group.pendingDeposit.toLocaleString()}
-                      </div>
-                    </div>
-                  </div>
+                    );
+                  })()}
                 </AccordionTrigger>
                 <AccordionContent className="pb-8">
                   <div className="space-y-6 animate-in fade-in duration-300">
@@ -663,6 +830,7 @@ export default function SalesPage() {
                             <TableHead className="text-[10px] font-black uppercase">Cliente</TableHead>
                             <TableHead className="text-[10px] font-black uppercase text-center">Cuentas ($)</TableHead>
                             <TableHead className="text-[10px] font-black uppercase">Rastreador Logístico</TableHead>
+                            <TableHead className="text-[10px] font-black uppercase">Repartidor</TableHead>
                             <TableHead className="text-right text-[10px] font-black uppercase pr-6">Acción</TableHead>
                           </TableRow>
                         </TableHeader>
@@ -706,27 +874,21 @@ export default function SalesPage() {
                                   </p>
                                 )}
                               </TableCell>
+                              <TableCell>
+                                {sale.deliveryPersonId ? (
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-[10px]">
+                                      {deliveryPersons.find(dp => dp.id === sale.deliveryPersonId)?.name.charAt(0) ?? '?'}
+                                    </div>
+                                    <span className="text-xs font-medium">{deliveryPersons.find(dp => dp.id === sale.deliveryPersonId)?.name ?? '—'}</span>
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-muted-foreground italic">Sin asignar</span>
+                                )}
+                              </TableCell>
                               <TableCell className="text-right pr-6">
                                 <div className="flex items-center justify-end gap-2">
-                                  {sale.photoUrl && (
-                                    <Dialog>
-                                      <DialogTrigger asChild>
-                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-primary hover:bg-primary/10 rounded-xl" title="Ver Evidencia">
-                                          <ImageIcon className="w-4 h-4" />
-                                        </Button>
-                                      </DialogTrigger>
-                                      <DialogContent className="sm:max-w-md">
-                                        <DialogHeader>
-                                          <DialogTitle>Evidencia de Venta #{sale.id.toUpperCase()}</DialogTitle>
-                                        </DialogHeader>
-                                        <div className="rounded-xl overflow-hidden border shadow-lg">
-                                          <img src={sale.photoUrl} alt="Evidencia" className="w-full h-auto" />
-                                        </div>
-                                      </DialogContent>
-                                    </Dialog>
-                                  )}
-
-                                  {deliveryPersons.length > 0 && !['paid', 'cancelled', 'delivery_failed', 'delivery_confirmed'].includes(sale.status) && (
+                                  {deliveryPersons.length > 0 && !FINAL_STATUSES.includes(sale.status) && (
                                     <Dialog open={assigningDeliveryForSaleId === sale.id} onOpenChange={(open) => setAssigningDeliveryForSaleId(open ? sale.id : null)}>
                                       <DialogTrigger asChild>
                                         <Button size="sm" variant="outline" className="text-[10px] h-8 px-3 font-bold border-2 border-blue-200 text-blue-600 hover:bg-blue-50 rounded-xl gap-1">
@@ -767,141 +929,34 @@ export default function SalesPage() {
                                       </DialogContent>
                                     </Dialog>
                                   )}
-                                  {sale.deliveryPhotoUrl && (
-                                    <Dialog>
-                                      <DialogTrigger asChild>
-                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-green-600 hover:bg-green-50 rounded-xl" title="Ver Foto de Entrega">
-                                          <Camera className="w-4 h-4" />
-                                        </Button>
-                                      </DialogTrigger>
-                                      <DialogContent className="sm:max-w-md">
-                                        <DialogHeader>
-                                          <DialogTitle>Foto de Entrega #{sale.id.toUpperCase()}</DialogTitle>
-                                          <DialogDescription className="text-xs">Evidencia fotográfica registrada por el repartidor.</DialogDescription>
-                                        </DialogHeader>
-                                        <div className="rounded-xl overflow-hidden border shadow-lg">
-                                          <img src={sale.deliveryPhotoUrl} alt="Foto de entrega" className="w-full h-auto" />
-                                        </div>
-                                      </DialogContent>
-                                    </Dialog>
+                                  {SALE_STATUS_BADGE_CONFIG[sale.status] && (
+                                    <Badge className={cn('text-[9px] font-black uppercase border-none', SALE_STATUS_BADGE_CONFIG[sale.status].color)}>
+                                      {SALE_STATUS_BADGE_CONFIG[sale.status].label}
+                                    </Badge>
                                   )}
-                                  {sale.status === 'delivered' && (
-                                    <Button size="sm" variant="outline" className="text-[10px] h-8 px-3 font-black border-2 border-green-200 text-green-700 hover:bg-green-600 hover:text-white transition-all rounded-xl gap-1" onClick={() => updateSaleStatus(sale.id, 'delivery_confirmed')}>
-                                      <CheckCircle2 className="w-3 h-3" /> Confirmar Entrega
-                                    </Button>
-                                  )}
-                                  {sale.status === 'delivery_confirmed' && (
-                                    <div className="flex flex-col items-end gap-1">
-                                      <CheckCircle2 className="w-4 h-4 text-green-600" />
-                                      <span className="text-[8px] uppercase font-black text-muted-foreground">Confirmado</span>
-                                    </div>
-                                  )}
-                                  {/* Botón "No Entregado" → pasa a pending_return (espera 48h) */}
-                                  {!['paid', 'cancelled', 'delivery_failed', 'pending_return', 'delivery_confirmed'].includes(sale.status) && (
+                                  {!sale.settlementId && (
                                     <AlertDialog>
                                       <AlertDialogTrigger asChild>
-                                        <Button size="sm" variant="outline" className="text-[10px] h-8 px-3 font-bold border-2 border-red-200 text-red-600 hover:bg-red-50 rounded-xl gap-1">
-                                          <XCircle className="w-3 h-3" /> No Entregado
+                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10 rounded-xl">
+                                          <Trash2 className="w-4 h-4" />
                                         </Button>
                                       </AlertDialogTrigger>
                                       <AlertDialogContent>
                                         <AlertDialogHeader>
-                                          <AlertDialogTitle>¿Marcar como No Entregado?</AlertDialogTitle>
+                                          <AlertDialogTitle>¿Eliminar esta venta?</AlertDialogTitle>
                                           <AlertDialogDescription>
-                                            El pedido pasará a "Pendiente de Devolución". Tendrás 48 horas para cancelarlo o reintentarlo. El stock NO se toca todavía.
+                                            Esta acción no se puede deshacer. El stock se devolverá al inventario del vendedor automáticamente.
                                           </AlertDialogDescription>
                                         </AlertDialogHeader>
                                         <AlertDialogFooter>
                                           <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                          <AlertDialogAction
-                                            className="bg-destructive text-destructive-foreground"
-                                            onClick={() => updateSaleStatus(sale.id, 'pending_return', { note: 'Marcado como no entregado — pendiente de resolución' })}
-                                          >
-                                            Confirmar
+                                          <AlertDialogAction onClick={() => deleteSale(sale.id)} className="bg-destructive text-destructive-foreground">
+                                            Eliminar Definitivamente
                                           </AlertDialogAction>
                                         </AlertDialogFooter>
                                       </AlertDialogContent>
                                     </AlertDialog>
                                   )}
-
-                                  {/* Botones de resolución para pedidos pendientes de devolución */}
-                                  {sale.status === 'pending_return' && (
-                                    <div className="flex flex-col gap-1.5">
-                                      <AlertDialog>
-                                        <AlertDialogTrigger asChild>
-                                          <Button size="sm" variant="destructive" className="text-[10px] h-7 px-3 font-bold rounded-xl gap-1 w-full">
-                                            <XCircle className="w-3 h-3" /> Cancelar Pedido
-                                          </Button>
-                                        </AlertDialogTrigger>
-                                        <AlertDialogContent>
-                                          <AlertDialogHeader>
-                                            <AlertDialogTitle>¿Cancelar el pedido?</AlertDialogTitle>
-                                            <AlertDialogDescription>
-                                              El stock de todos los productos se devolverá al inventario del vendedor. Esta acción no se puede deshacer.
-                                            </AlertDialogDescription>
-                                          </AlertDialogHeader>
-                                          <AlertDialogFooter>
-                                            <AlertDialogCancel>Atrás</AlertDialogCancel>
-                                            <AlertDialogAction
-                                              className="bg-destructive text-destructive-foreground"
-                                              onClick={() => cancelFailedOrder(sale.id)}
-                                            >
-                                              Cancelar y Devolver Stock
-                                            </AlertDialogAction>
-                                          </AlertDialogFooter>
-                                        </AlertDialogContent>
-                                      </AlertDialog>
-                                      <AlertDialog>
-                                        <AlertDialogTrigger asChild>
-                                          <Button size="sm" variant="outline" className="text-[10px] h-7 px-3 font-bold border-2 border-blue-200 text-blue-600 hover:bg-blue-50 rounded-xl gap-1 w-full">
-                                            <RotateCcw className="w-3 h-3" /> Reintentar Entrega
-                                          </Button>
-                                        </AlertDialogTrigger>
-                                        <AlertDialogContent>
-                                          <AlertDialogHeader>
-                                            <AlertDialogTitle>¿Reintentar la entrega?</AlertDialogTitle>
-                                            <AlertDialogDescription>
-                                              El pedido volverá a estado "En Ruta". El stock no se modifica.
-                                            </AlertDialogDescription>
-                                          </AlertDialogHeader>
-                                          <AlertDialogFooter>
-                                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                            <AlertDialogAction onClick={() => retryDelivery(sale.id)}>
-                                              Reintentar
-                                            </AlertDialogAction>
-                                          </AlertDialogFooter>
-                                        </AlertDialogContent>
-                                      </AlertDialog>
-                                    </div>
-                                  )}
-                                  {sale.status === 'paid' && (
-                                    <div className="flex flex-col items-end gap-1">
-                                      <CheckCircle2 className="w-4 h-4 text-green-600" />
-                                      <span className="text-[8px] uppercase font-black text-muted-foreground">Completada</span>
-                                    </div>
-                                  )}
-                                  
-                                  <AlertDialog>
-                                    <AlertDialogTrigger asChild>
-                                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10 rounded-xl">
-                                        <Trash2 className="w-4 h-4" />
-                                      </Button>
-                                    </AlertDialogTrigger>
-                                    <AlertDialogContent>
-                                      <AlertDialogHeader>
-                                        <AlertDialogTitle>¿Eliminar esta venta?</AlertDialogTitle>
-                                        <AlertDialogDescription>
-                                          Esta acción no se puede deshacer. El stock se devolverá al inventario del vendedor automáticamente.
-                                        </AlertDialogDescription>
-                                      </AlertDialogHeader>
-                                      <AlertDialogFooter>
-                                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                        <AlertDialogAction onClick={() => deleteSale(sale.id)} className="bg-destructive text-destructive-foreground">
-                                          Eliminar Definitivamente
-                                        </AlertDialogAction>
-                                      </AlertDialogFooter>
-                                    </AlertDialogContent>
-                                  </AlertDialog>
                                 </div>
                               </TableCell>
                             </TableRow>

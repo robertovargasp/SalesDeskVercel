@@ -1,7 +1,7 @@
 
 "use client"
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useStore } from '@/hooks/use-store';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -9,11 +9,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Truck, CheckCircle2, XCircle, MapPin, User, Phone,
   Package, ExternalLink, Copy, ArrowLeft, Calendar, Clock,
-  AlertTriangle, ChevronRight, ShoppingCart, Camera
+  AlertTriangle, ChevronRight, ShoppingCart, MessageSquare,
+  TrendingUp, Wallet, Camera, Send, DollarSign
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
@@ -59,20 +61,111 @@ function getNextStep(status: string): { label: string; nextStatus: SaleStatus } 
 }
 
 export default function DeliveryPage() {
-  const { currentUser, sales, products, updateSaleStatus, confirmDelivery, reportDeliveryFailure } = useStore();
+  const { currentUser, sales, products, settlements, updateSaleStatus, confirmDelivery, reportDeliveryFailure, reportSettlement } = useStore();
 
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const [failureDialogOpen, setFailureDialogOpen] = useState(false);
   const [failureReason, setFailureReason] = useState('');
   const [customReason, setCustomReason] = useState('');
-  const [deliveryPhotoDialogOpen, setDeliveryPhotoDialogOpen] = useState(false);
-  const [deliveryPhotoBase64, setDeliveryPhotoBase64] = useState<string | undefined>(undefined);
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  const [deliveryOutcome, setDeliveryOutcome] = useState<'entregado' | 'no_lo_quiere' | 'rechazado' | null>(null);
+  const [deliveryComment, setDeliveryComment] = useState('');
 
-  const mySales = useMemo(() => sales, [sales]);
+  // Settlement states
+  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
+  const [settlementAmount, setSettlementAmount] = useState('');
+  const [settlementReference, setSettlementReference] = useState('');
+  const [settlementProof, setSettlementProof] = useState<string | undefined>(undefined);
+
+  const mySales = useMemo(
+    () => sales.filter(s => s.deliveryPersonId === currentUser?.id),
+    [sales, currentUser?.id]
+  );
 
   const pendingSales = mySales.filter(s => !['delivered', 'delivery_confirmed', 'paid', 'cancelled', 'delivery_failed'].includes(s.status));
   const completedSales = mySales.filter(s => ['delivered', 'delivery_confirmed', 'paid'].includes(s.status));
   const failedSales = mySales.filter(s => s.status === 'delivery_failed');
+
+  const financials = useMemo(() => {
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    const todayCount = completedSales.filter(
+      s => new Date(s.createdAt).toLocaleDateString('en-CA') === todayStr
+    ).length;
+    const unsettled = completedSales.filter(s => !s.settlementId);
+    const comision = unsettled.reduce((sum, s) => sum + s.totalComision, 0);
+    const deposito = unsettled.reduce((sum, s) => sum + s.totalDeposito, 0);
+    const totalVenta = completedSales.reduce((sum, s) => sum + s.totalVenta, 0);
+    return { todayCount, comision, deposito, unsettledCount: unsettled.length, totalVenta };
+  }, [completedSales]);
+
+  const unsettledDeliveries = useMemo(
+    () => completedSales.filter(s => !s.settlementId),
+    [completedSales]
+  );
+
+  const selectedUnsettled = useMemo(
+    () => unsettledDeliveries.filter(s => selectedOrderIds.has(s.id)),
+    [unsettledDeliveries, selectedOrderIds]
+  );
+
+  const settlementTotals = useMemo(() => {
+    const totalVenta     = selectedUnsettled.reduce((s, v) => s + v.totalVenta,    0);
+    const totalComision  = selectedUnsettled.reduce((s, v) => s + v.totalComision, 0);
+    const totalDeposito  = selectedUnsettled.reduce((s, v) => s + v.totalDeposito, 0);
+    return { totalVenta, totalComision, totalDeposito, count: selectedUnsettled.length, totalAvailable: unsettledDeliveries.length };
+  }, [selectedUnsettled, unsettledDeliveries.length]);
+
+  const mySettlements = useMemo(
+    () => settlements.filter(s => s.sellerId === currentUser?.id),
+    [settlements, currentUser]
+  );
+
+  useEffect(() => {
+    setSelectedOrderIds(new Set(unsettledDeliveries.map(s => s.id)));
+  }, [unsettledDeliveries.length]);
+
+  useEffect(() => {
+    setSettlementAmount(settlementTotals.totalDeposito > 0 ? settlementTotals.totalDeposito.toString() : '');
+  }, [settlementTotals.totalDeposito]);
+
+  const handleSettlementProof = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => setSettlementProof(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const handleSubmitSettlement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = parseFloat(settlementAmount);
+    if (isNaN(amount) || amount <= 0) {
+      toast({ variant: 'destructive', title: 'Monto inválido', description: 'Ingresa una cantidad mayor a 0.' });
+      return;
+    }
+    if (!settlementReference.trim()) {
+      toast({ variant: 'destructive', title: 'Referencia requerida', description: 'Ingresa el folio o referencia de depósito.' });
+      return;
+    }
+    if (!settlementProof) {
+      toast({ variant: 'destructive', title: 'Comprobante requerido', description: 'Toma una foto del comprobante antes de enviar.' });
+      return;
+    }
+    if (!currentUser?.id) return;
+    const weekRange = new Date().toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' });
+    await reportSettlement(
+      currentUser.id,
+      weekRange,
+      settlementTotals.totalVenta,
+      settlementTotals.totalComision,
+      amount,
+      settlementReference.trim(),
+      settlementProof,
+      selectedUnsettled.map(s => s.id)
+    );
+    setSettlementReference('');
+    setSettlementProof(undefined);
+  };
 
   const selectedSale = mySales.find(s => s.id === selectedSaleId);
 
@@ -82,21 +175,25 @@ export default function DeliveryPage() {
     toast({ title: "Copiado" });
   };
 
-  const handleDeliveryPhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => setDeliveryPhotoBase64(reader.result as string);
-      reader.readAsDataURL(file);
-    }
+  const closeConfirmDialog = () => {
+    setConfirmDialogOpen(false);
+    setDeliveryOutcome(null);
+    setDeliveryComment('');
   };
 
-  const handleConfirmDelivery = () => {
-    if (!selectedSale || !deliveryPhotoBase64) return;
-    confirmDelivery(selectedSale.id, deliveryPhotoBase64);
-    setDeliveryPhotoDialogOpen(false);
-    setDeliveryPhotoBase64(undefined);
-    toast({ title: '¡Entregado!', description: 'El pedido fue confirmado con evidencia fotográfica.' });
+  const handleConfirmDelivery = async () => {
+    if (!selectedSale || !deliveryOutcome) return;
+
+    if (deliveryOutcome === 'entregado') {
+      await confirmDelivery(selectedSale.id, deliveryComment || undefined);
+      toast({ title: '¡Entregado!', description: 'El pedido fue marcado como entregado.' });
+    } else {
+      const reasonLabel = deliveryOutcome === 'no_lo_quiere' ? 'No lo quiere' : 'Rechazado';
+      const fullReason = deliveryComment.trim() ? `${reasonLabel}: ${deliveryComment.trim()}` : reasonLabel;
+      await reportDeliveryFailure(selectedSale.id, fullReason);
+    }
+
+    closeConfirmDialog();
     setSelectedSaleId(null);
   };
 
@@ -105,7 +202,7 @@ export default function DeliveryPage() {
     const next = getNextStep(selectedSale.status);
     if (!next) return;
     if (next.nextStatus === 'delivered') {
-      setDeliveryPhotoDialogOpen(true);
+      setConfirmDialogOpen(true);
       return;
     }
     const notes: Record<string, string> = {
@@ -137,57 +234,70 @@ export default function DeliveryPage() {
 
     return (
       <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
-        {/* Modal: foto obligatoria para confirmar entrega */}
-        <Dialog
-          open={deliveryPhotoDialogOpen}
-          onOpenChange={(open) => { if (!open) { setDeliveryPhotoDialogOpen(false); setDeliveryPhotoBase64(undefined); } }}
-        >
+        {/* Modal: resultado de la entrega */}
+        <Dialog open={confirmDialogOpen} onOpenChange={(open) => { if (!open) closeConfirmDialog(); }}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Confirmar Entrega</DialogTitle>
               <DialogDescription>
-                Sube una foto como evidencia de la entrega. Es obligatoria para registrar el pedido como entregado.
+                ¿Cómo resultó la entrega? Selecciona un estado para continuar.
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-4 py-2">
-              <Button
+            <div className="space-y-3 py-2">
+              {(
+                [
+                  { value: 'entregado',     label: 'Entregado',     desc: 'El cliente recibió el pedido',    color: 'border-green-500 bg-green-50 text-green-700'   },
+                  { value: 'no_lo_quiere',  label: 'No lo quiere',  desc: 'El cliente rechazó el pedido',    color: 'border-orange-400 bg-orange-50 text-orange-700' },
+                  { value: 'rechazado',     label: 'Rechazado',     desc: 'El cliente no aceptó la entrega', color: 'border-red-400 bg-red-50 text-red-700'          },
+                ] as const
+              ).map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setDeliveryOutcome(opt.value)}
+                  className={cn(
+                    'w-full text-left p-3 rounded-xl border-2 transition-all',
+                    deliveryOutcome === opt.value
+                      ? opt.color + ' font-bold'
+                      : 'border-muted hover:bg-muted/40'
+                  )}
+                >
+                  <p className="text-sm font-semibold">{opt.label}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{opt.desc}</p>
+                </button>
+              ))}
+
+              <button
                 type="button"
-                variant="outline"
-                className="w-full gap-3 h-16 border-dashed border-2 bg-muted/10 hover:bg-primary/5 hover:border-primary/40 rounded-2xl transition-all"
-                asChild
+                onClick={() => { closeConfirmDialog(); setFailureDialogOpen(true); }}
+                className="w-full text-left p-3 rounded-xl border-2 border-muted hover:bg-muted/40 transition-all"
               >
-                <label>
-                  <Camera className="w-6 h-6" />
-                  <span className="font-black text-sm">
-                    {deliveryPhotoBase64 ? 'Cambiar Foto' : 'Subir Foto de Entrega'}
-                  </span>
-                  <input type="file" className="hidden" accept="image/*" onChange={handleDeliveryPhotoChange} />
-                </label>
-              </Button>
-              {deliveryPhotoBase64 ? (
-                <div className="flex items-center gap-2 text-green-600">
-                  <CheckCircle2 className="w-5 h-5" />
-                  <span className="text-sm font-bold">Foto lista</span>
-                </div>
-              ) : (
-                <p className="text-[10px] text-red-500 font-bold text-center">
-                  * La foto es obligatoria para confirmar la entrega
+                <p className="text-sm font-semibold flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-muted-foreground" /> Reportar problema
                 </p>
-              )}
+                <p className="text-xs text-muted-foreground mt-0.5">Dirección incorrecta, zona de riesgo u otro inconveniente</p>
+              </button>
+
+              <div className="pt-1">
+                <Label className="text-[10px] font-black text-muted-foreground uppercase flex items-center gap-1 mb-1.5">
+                  <MessageSquare className="w-3 h-3" /> Comentario (opcional)
+                </Label>
+                <Textarea
+                  placeholder="Agrega un comentario si lo deseas..."
+                  value={deliveryComment}
+                  onChange={e => setDeliveryComment(e.target.value)}
+                  className="resize-none h-20 text-sm"
+                />
+              </div>
             </div>
             <DialogFooter className="gap-2">
-              <Button
-                variant="outline"
-                onClick={() => { setDeliveryPhotoDialogOpen(false); setDeliveryPhotoBase64(undefined); }}
-              >
-                Cancelar
-              </Button>
+              <Button variant="outline" onClick={closeConfirmDialog}>Cancelar</Button>
               <Button
                 className="bg-green-600 hover:bg-green-700 gap-2"
-                disabled={!deliveryPhotoBase64}
+                disabled={!deliveryOutcome}
                 onClick={handleConfirmDelivery}
               >
-                <CheckCircle2 className="w-4 h-4" /> Confirmar Entrega
+                <CheckCircle2 className="w-4 h-4" /> Confirmar
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -434,110 +544,411 @@ export default function DeliveryPage() {
         <p className="text-muted-foreground text-sm">Hola, {currentUser?.name} — {currentUser?.city}</p>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
-        {[
-          { label: 'Pendientes', value: pendingSales.length, icon: Clock, color: 'text-orange-500' },
-          { label: 'Entregadas', value: completedSales.length, icon: CheckCircle2, color: 'text-green-600' },
-          { label: 'Fallidas',   value: failedSales.length,   icon: AlertTriangle, color: 'text-red-500' },
-        ].map((s, i) => (
-          <Card key={i} className="border-none shadow-sm">
-            <CardContent className="p-4 flex items-center gap-3">
-              <s.icon className={cn("w-7 h-7", s.color)} />
-              <div>
-                <p className="text-[10px] font-black text-muted-foreground uppercase">{s.label}</p>
-                <p className="text-2xl font-black">{s.value}</p>
+      <Tabs defaultValue="entregas">
+        <TabsList>
+          <TabsTrigger value="entregas">Mis Entregas</TabsTrigger>
+          <TabsTrigger value="liquidar" className="relative">
+            Liquidar
+            {settlementTotals.count > 0 && (
+              <span className="ml-1.5 bg-orange-500 text-white text-[9px] font-black rounded-full px-1.5 py-0.5 leading-none">
+                {settlementTotals.count}
+              </span>
+            )}
+          </TabsTrigger>
+        </TabsList>
+
+        {/* ── Mis Entregas ─────────────────────────────────────────────────── */}
+        <TabsContent value="entregas" className="space-y-6 mt-6">
+          <div className="grid grid-cols-3 gap-4">
+            {[
+              { label: 'Pendientes', value: pendingSales.length, icon: Clock, color: 'text-orange-500' },
+              { label: 'Entregadas', value: completedSales.length, icon: CheckCircle2, color: 'text-green-600' },
+              { label: 'Fallidas',   value: failedSales.length,   icon: AlertTriangle, color: 'text-red-500' },
+            ].map((s, i) => (
+              <Card key={i} className="border-none shadow-sm">
+                <CardContent className="p-4 flex items-center gap-3">
+                  <s.icon className={cn("w-7 h-7", s.color)} />
+                  <div>
+                    <p className="text-[10px] font-black text-muted-foreground uppercase">{s.label}</p>
+                    <p className="text-2xl font-black">{s.value}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Resumen financiero */}
+          <Card className="border-none shadow-sm rounded-2xl overflow-hidden">
+            <CardHeader className="pb-0 pt-4 px-5">
+              <CardTitle className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
+                Resumen Financiero
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-5 pt-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <Truck className="w-3.5 h-3.5" />
+                    <span className="text-[10px] font-black uppercase">Entregadas hoy</span>
+                  </div>
+                  <p className="text-3xl font-black">{financials.todayCount}</p>
+                  <p className="text-[10px] text-muted-foreground">{completedSales.length} total</p>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <DollarSign className="w-3.5 h-3.5" />
+                    <span className="text-[10px] font-black uppercase">Total cobrado</span>
+                  </div>
+                  <p className="text-3xl font-black text-primary">
+                    ${financials.totalVenta.toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">acumulado</p>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <TrendingUp className="w-3.5 h-3.5" />
+                    <span className="text-[10px] font-black uppercase">Mi comisión</span>
+                  </div>
+                  <p className="text-3xl font-black text-green-600">
+                    ${financials.comision.toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">sin liquidar</p>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <Wallet className="w-3.5 h-3.5" />
+                    <span className="text-[10px] font-black uppercase">Por depositar</span>
+                  </div>
+                  <p className={cn("text-3xl font-black", financials.deposito > 0 ? "text-orange-600" : "text-muted-foreground")}>
+                    ${financials.deposito.toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">a entregar al admin</p>
+                </div>
               </div>
             </CardContent>
           </Card>
-        ))}
-      </div>
 
-      <Tabs defaultValue="pending">
-        <TabsList>
-          <TabsTrigger value="pending">Pendientes ({pendingSales.length})</TabsTrigger>
-          <TabsTrigger value="completed">Completadas ({completedSales.length})</TabsTrigger>
-          {failedSales.length > 0 && <TabsTrigger value="failed">Fallidas ({failedSales.length})</TabsTrigger>}
-        </TabsList>
+          <Tabs defaultValue="pending">
+            <TabsList>
+              <TabsTrigger value="pending">Pendientes ({pendingSales.length})</TabsTrigger>
+              <TabsTrigger value="completed">Completadas ({completedSales.length})</TabsTrigger>
+              {failedSales.length > 0 && <TabsTrigger value="failed">Fallidas ({failedSales.length})</TabsTrigger>}
+            </TabsList>
 
-        {(['pending', 'completed', 'failed'] as const).map(tab => {
-          const tabSales = tab === 'pending' ? pendingSales : tab === 'completed' ? completedSales : failedSales;
-          return (
-            <TabsContent key={tab} value={tab}>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                {tabSales.slice().reverse().map(sale => (
-                  <Card
-                    key={sale.id}
-                    className={cn(
-                      "border-none shadow-sm hover:shadow-md transition-all cursor-pointer rounded-2xl overflow-hidden",
-                      tab === 'pending' ? "ring-1 ring-primary/20" :
-                      tab === 'failed' ? "ring-1 ring-red-200" : ""
+            {(['pending', 'completed', 'failed'] as const).map(tab => {
+              const tabSales = tab === 'pending' ? pendingSales : tab === 'completed' ? completedSales : failedSales;
+              return (
+                <TabsContent key={tab} value={tab}>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                    {tabSales.slice().reverse().map(sale => (
+                      <Card
+                        key={sale.id}
+                        className={cn(
+                          "border-none shadow-sm hover:shadow-md transition-all cursor-pointer rounded-2xl overflow-hidden",
+                          tab === 'pending' ? "ring-1 ring-primary/20" :
+                          tab === 'failed' ? "ring-1 ring-red-200" : ""
+                        )}
+                        onClick={() => setSelectedSaleId(sale.id)}
+                      >
+                        <CardContent className="p-5">
+                          <div className="flex items-start justify-between mb-4">
+                            <div>
+                              <p className="font-black text-base">#{sale.id.toUpperCase()}</p>
+                              <p className="text-[10px] text-muted-foreground">{new Date(sale.createdAt).toLocaleDateString()}</p>
+                            </div>
+                            {tab === 'completed' && <CheckCircle2 className="w-6 h-6 text-green-500" />}
+                            {tab === 'failed' && <XCircle className="w-6 h-6 text-red-500" />}
+                            {tab === 'pending' && <Truck className="w-6 h-6 text-orange-400 animate-pulse" />}
+                          </div>
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2">
+                              <User className="w-3.5 h-3.5 text-muted-foreground" />
+                              <span className="font-bold text-sm">{sale.customerName || 'Cliente'}</span>
+                            </div>
+                            {sale.customerPhone && (
+                              <div className="flex items-center gap-2">
+                                <Phone className="w-3.5 h-3.5 text-muted-foreground" />
+                                <span className="text-sm text-muted-foreground">{sale.customerPhone}</span>
+                              </div>
+                            )}
+                            {sale.city && (
+                              <div className="flex items-center gap-2">
+                                <MapPin className="w-3.5 h-3.5 text-muted-foreground" />
+                                <span className="text-xs text-muted-foreground">{sale.city}</span>
+                              </div>
+                            )}
+                            {sale.customerAddress && (
+                              <div className="flex items-start gap-2 pl-5">
+                                <span className="text-xs text-muted-foreground line-clamp-1">{sale.customerAddress}</span>
+                              </div>
+                            )}
+                          </div>
+                          {tab === 'failed' && sale.failureReason && (
+                            <div className="mt-3 bg-red-50 rounded-lg p-2 flex items-center gap-2">
+                              <AlertTriangle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
+                              <p className="text-[11px] text-red-600 font-medium">{sale.failureReason}</p>
+                            </div>
+                          )}
+                          <div className="mt-4 border-t pt-3">
+                            <p className="text-[9px] text-muted-foreground uppercase font-black mb-1">Productos</p>
+                            <div className="space-y-0.5">
+                              {sale.items.map((item, idx) => {
+                                const p = products.find(prod => prod.id === item.productId);
+                                return (
+                                  <p key={idx} className="text-xs font-bold">
+                                    {p?.name || 'Producto'} <span className="text-muted-foreground font-normal">×{item.quantity}</span>
+                                  </p>
+                                );
+                              })}
+                            </div>
+                            <div className="flex justify-end mt-2">
+                              <div className="bg-primary/10 p-1.5 rounded-full">
+                                <ChevronRight className="w-4 h-4 text-primary" />
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                    {tabSales.length === 0 && (
+                      <div className="col-span-full py-16 text-center bg-white rounded-2xl border-2 border-dashed">
+                        <ShoppingCart className="w-10 h-10 mx-auto text-muted-foreground/20 mb-3" />
+                        <p className="text-muted-foreground italic text-sm">
+                          {tab === 'pending' ? 'No tienes entregas pendientes' :
+                           tab === 'completed' ? 'Sin entregas completadas aún' : 'Sin fallos registrados'}
+                        </p>
+                      </div>
                     )}
-                    onClick={() => setSelectedSaleId(sale.id)}
+                  </div>
+                </TabsContent>
+              );
+            })}
+          </Tabs>
+        </TabsContent>
+
+        {/* ── Liquidar ─────────────────────────────────────────────────────── */}
+        <TabsContent value="liquidar" className="space-y-6 mt-6">
+          {/* Balance summary */}
+          <Card className="border-none shadow-sm rounded-2xl overflow-hidden">
+            <CardHeader className="pb-0 pt-4 px-5">
+              <CardTitle className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
+                Balance a liquidar
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-5 pt-3">
+              <div className="grid grid-cols-3 gap-4">
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <Wallet className="w-3.5 h-3.5" />
+                    <span className="text-[10px] font-black uppercase">Total cobrado</span>
+                  </div>
+                  <p className="text-3xl font-black">
+                    ${settlementTotals.totalVenta.toLocaleString('es-MX', { minimumFractionDigits: 0 })}
+                  </p>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <TrendingUp className="w-3.5 h-3.5" />
+                    <span className="text-[10px] font-black uppercase">Mi comisión</span>
+                  </div>
+                  <p className="text-3xl font-black text-green-600">
+                    ${settlementTotals.totalComision.toLocaleString('es-MX', { minimumFractionDigits: 0 })}
+                  </p>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <DollarSign className="w-3.5 h-3.5" />
+                    <span className="text-[10px] font-black uppercase">A depositar</span>
+                  </div>
+                  <p className={cn("text-3xl font-black", settlementTotals.totalDeposito > 0 ? "text-orange-600" : "text-muted-foreground")}>
+                    ${settlementTotals.totalDeposito.toLocaleString('es-MX', { minimumFractionDigits: 0 })}
+                  </p>
+                </div>
+              </div>
+              {settlementTotals.count > 0 && (
+                <p className="text-xs text-muted-foreground mt-3 border-t pt-3">
+                  {settlementTotals.count} {settlementTotals.count === 1 ? 'entrega sin liquidar' : 'entregas sin liquidar'}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Form or all-settled state */}
+          {settlementTotals.totalAvailable === 0 ? (
+            <Card className="border-none shadow-sm rounded-2xl">
+              <CardContent className="py-16 flex flex-col items-center gap-3 text-center">
+                <div className="bg-green-50 p-5 rounded-full">
+                  <CheckCircle2 className="w-10 h-10 text-green-500" />
+                </div>
+                <p className="font-black text-lg">¡Al corriente!</p>
+                <p className="text-muted-foreground text-sm">No tienes entregas pendientes de liquidar.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="border-none shadow-sm rounded-2xl">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-black">Enviar Reporte de Liquidación</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleSubmitSettlement} className="space-y-5">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-[10px] font-black uppercase text-muted-foreground">
+                        Pedidos a incluir ({settlementTotals.count} de {settlementTotals.totalAvailable})
+                      </Label>
+                      <button
+                        type="button"
+                        className="text-[10px] text-primary font-bold hover:underline"
+                        onClick={() => setSelectedOrderIds(
+                          selectedOrderIds.size === unsettledDeliveries.length
+                            ? new Set()
+                            : new Set(unsettledDeliveries.map(s => s.id))
+                        )}
+                      >
+                        {selectedOrderIds.size === unsettledDeliveries.length ? 'Deseleccionar todo' : 'Seleccionar todo'}
+                      </button>
+                    </div>
+                    <div className="space-y-1.5 max-h-44 overflow-y-auto rounded-xl border bg-muted/10 p-3">
+                      {unsettledDeliveries.map(s => (
+                        <label key={s.id} className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-muted/30 transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={selectedOrderIds.has(s.id)}
+                            onChange={e => {
+                              const next = new Set(selectedOrderIds);
+                              if (e.target.checked) next.add(s.id); else next.delete(s.id);
+                              setSelectedOrderIds(next);
+                            }}
+                            className="w-4 h-4 accent-primary"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-bold truncate">{s.customerName || 'Cliente'}</p>
+                            <p className="text-[10px] text-muted-foreground">{s.city || '—'}</p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-xs font-black text-primary">${s.totalDeposito.toLocaleString()}</p>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-[10px] font-black uppercase text-muted-foreground flex items-center gap-1">
+                      <DollarSign className="w-3 h-3" /> Monto a depositar
+                    </Label>
+                    <div className="relative">
+                      <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={settlementAmount}
+                        onChange={e => setSettlementAmount(e.target.value)}
+                        className="pl-9 h-12 text-lg font-black"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-[10px] font-black uppercase text-muted-foreground">
+                      Referencia / Folio de depósito
+                    </Label>
+                    <Input
+                      placeholder="Ej: TRANSF-20260609-001"
+                      value={settlementReference}
+                      onChange={e => setSettlementReference(e.target.value)}
+                      className="h-12"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-[10px] font-black uppercase text-muted-foreground flex items-center gap-1">
+                      <Camera className="w-3 h-3" /> Comprobante <span className="text-destructive">*</span>
+                    </Label>
+                    {settlementProof ? (
+                      <div className="relative">
+                        <img src={settlementProof} alt="Comprobante" className="w-full max-h-48 object-contain rounded-xl border" />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="absolute top-2 right-2"
+                          onClick={() => setSettlementProof(undefined)}
+                        >
+                          Cambiar
+                        </Button>
+                      </div>
+                    ) : (
+                      <label className="flex flex-col items-center justify-center border-2 border-dashed border-destructive/50 rounded-xl h-28 cursor-pointer hover:bg-muted/20 transition-colors">
+                        <Camera className="w-6 h-6 text-destructive/60 mb-2" />
+                        <span className="text-xs text-destructive/70 font-bold">Foto obligatoria</span>
+                        <span className="text-[10px] text-muted-foreground">Tomar foto o subir archivo</span>
+                        <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleSettlementProof} />
+                      </label>
+                    )}
+                  </div>
+                  <Button
+                    type="submit"
+                    className="w-full h-12 font-black gap-2 bg-green-600 hover:bg-green-700"
+                    disabled={!settlementAmount || !settlementReference.trim() || !settlementProof || settlementTotals.count === 0}
                   >
-                    <CardContent className="p-5">
-                      <div className="flex items-start justify-between mb-4">
+                    <Send className="w-4 h-4" /> Enviar al Admin
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Settlement history */}
+          {mySettlements.length > 0 && (
+            <Card className="border-none shadow-sm rounded-2xl overflow-hidden">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-black text-muted-foreground uppercase tracking-widest">
+                  Historial de Liquidaciones
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="divide-y">
+                  {mySettlements.map(s => (
+                    <div key={s.id} className={cn(
+                      "px-5 py-4",
+                      s.status === 'rejected' ? 'bg-red-50/60' : ''
+                    )}>
+                      <div className="flex items-center justify-between">
                         <div>
-                          <p className="font-black text-base">#{sale.id.toUpperCase()}</p>
-                          <p className="text-[10px] text-muted-foreground">{new Date(sale.createdAt).toLocaleDateString()}</p>
-                        </div>
-                        {tab === 'completed' && <CheckCircle2 className="w-6 h-6 text-green-500" />}
-                        {tab === 'failed' && <XCircle className="w-6 h-6 text-red-500" />}
-                        {tab === 'pending' && <Truck className="w-6 h-6 text-orange-400 animate-pulse" />}
-                      </div>
-
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <User className="w-3.5 h-3.5 text-muted-foreground" />
-                          <span className="font-bold text-sm">{sale.customerName || 'Cliente'}</span>
-                        </div>
-                        {sale.customerPhone && (
-                          <div className="flex items-center gap-2">
-                            <Phone className="w-3.5 h-3.5 text-muted-foreground" />
-                            <span className="text-sm text-muted-foreground">{sale.customerPhone}</span>
-                          </div>
-                        )}
-                        {sale.customerAddress && (
-                          <div className="flex items-start gap-2">
-                            <MapPin className="w-3.5 h-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
-                            <span className="text-xs text-muted-foreground line-clamp-1">{sale.customerAddress}</span>
-                          </div>
-                        )}
-                      </div>
-
-                      {tab === 'failed' && sale.failureReason && (
-                        <div className="mt-3 bg-red-50 rounded-lg p-2 flex items-center gap-2">
-                          <AlertTriangle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
-                          <p className="text-[11px] text-red-600 font-medium">{sale.failureReason}</p>
-                        </div>
-                      )}
-
-                      <div className="mt-4 flex items-center justify-between border-t pt-3">
-                        <div>
-                          <p className="text-[9px] text-muted-foreground uppercase font-black">Productos</p>
-                          <p className="text-xs font-bold">
-                            {sale.items.reduce((a, i) => a + i.quantity, 0)} pzas — {sale.items.length} tipo{sale.items.length > 1 ? 's' : ''}
+                          <p className="font-bold text-sm">{s.weekRange}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {s.reportedAt ? new Date(s.reportedAt).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
                           </p>
                         </div>
-                        <div className="bg-primary/10 p-1.5 rounded-full">
-                          <ChevronRight className="w-4 h-4 text-primary" />
+                        <div className="text-right">
+                          <p className="font-black text-primary">${s.totalDeposito.toLocaleString('es-MX', { minimumFractionDigits: 0 })}</p>
+                          <Badge className={cn(
+                            "text-[9px] font-black uppercase border-none mt-1",
+                            s.status === 'confirmed' ? 'bg-green-100 text-green-800' :
+                            s.status === 'reported'  ? 'bg-orange-100 text-orange-700' :
+                            s.status === 'rejected'  ? 'bg-red-100 text-red-700' :
+                                                       'bg-muted text-muted-foreground'
+                          )}>
+                            {s.status === 'confirmed' ? 'Confirmado' :
+                             s.status === 'reported'  ? 'Pendiente' :
+                             s.status === 'rejected'  ? 'Rechazado' : s.status}
+                          </Badge>
                         </div>
                       </div>
-                    </CardContent>
-                  </Card>
-                ))}
-                {tabSales.length === 0 && (
-                  <div className="col-span-full py-16 text-center bg-white rounded-2xl border-2 border-dashed">
-                    <ShoppingCart className="w-10 h-10 mx-auto text-muted-foreground/20 mb-3" />
-                    <p className="text-muted-foreground italic text-sm">
-                      {tab === 'pending' ? 'No tienes entregas pendientes' :
-                       tab === 'completed' ? 'Sin entregas completadas aún' : 'Sin fallos registrados'}
-                    </p>
-                  </div>
-                )}
-              </div>
-            </TabsContent>
-          );
-        })}
+                      {s.status === 'rejected' && s.rejectionReason && (
+                        <div className="mt-2 flex items-start gap-2 bg-red-100/60 rounded-lg px-3 py-2">
+                          <XCircle className="w-3.5 h-3.5 text-red-600 mt-0.5 shrink-0" />
+                          <p className="text-[11px] text-red-700 font-medium">
+                            <span className="font-black">Motivo:</span> {s.rejectionReason}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
       </Tabs>
     </div>
   );

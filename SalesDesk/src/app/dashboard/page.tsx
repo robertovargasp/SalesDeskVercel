@@ -68,15 +68,16 @@ export default function DashboardPage() {
     const totalComisiones = filteredSales
       .filter(s => !['cancelled', 'delivery_failed'].includes(s.status))
       .reduce((acc, s) => acc + s.totalComision, 0);
+    return { enRuta, entregadas, pagadas, fallidas, dineroManos, totalVentas, totalComisiones };
+  }, [filteredSales]);
 
-    const lowStockCount = products.reduce((acc, p) => {
+  const lowStockCount = useMemo(() =>
+    products.reduce((acc, p) => {
       const minStock = p.minStock ?? 4;
       const hasLow = inventory.some(i => i.productId === p.id && i.quantity <= minStock && i.quantity > 0);
       return hasLow ? acc + 1 : acc;
-    }, 0);
-
-    return { enRuta, entregadas, pagadas, fallidas, dineroManos, totalVentas, totalComisiones, lowStockCount };
-  }, [filteredSales, products, inventory]);
+    }, 0),
+  [products, inventory]);
 
   const cityChartData = useMemo(() => {
     const map: Record<string, number> = {};
@@ -105,12 +106,25 @@ export default function DashboardPage() {
     }).filter(r => r.totalVenta > 0 || r.activas > 0);
   }, [isAdmin, users, baseSales]);
 
+  const deliveryRows = useMemo(() => {
+    if (!isAdmin) return [];
+    const deliveryPersons = users.filter(u => u.role === 'delivery');
+    return deliveryPersons.map(dp => {
+      const dpSales = baseSales.filter(s => s.deliveryPersonId === dp.id);
+      const entregados = dpSales.filter(s => s.status === 'delivered' || s.status === 'paid').length;
+      const fallidos = dpSales.filter(s => s.status === 'delivery_failed').length;
+      const activos = dpSales.filter(s => ['assigned', 'accepted', 'contacting', 'scheduled', 'in_transit'].includes(s.status)).length;
+      return { dp, entregados, fallidos, activos };
+    }).filter(r => r.entregados > 0 || r.fallidos > 0 || r.activos > 0);
+  }, [isAdmin, users, baseSales]);
+
   const dateLabel = dateFilter === 'custom' && customStart
     ? `${format(customStart, 'd MMM', { locale: es })}${customEnd ? ` – ${format(customEnd, 'd MMM', { locale: es })}` : ''}`
     : DATE_FILTER_LABELS[dateFilter];
 
   return (
     <div className="space-y-8">
+
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
@@ -123,7 +137,6 @@ export default function DashboardPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* Date Filter */}
           <Select value={dateFilter} onValueChange={(v) => setDateFilter(v as DateRangeFilter)}>
             <SelectTrigger className="w-40 bg-card border shadow-sm">
               <CalendarDays className="w-4 h-4 mr-2 text-muted-foreground" />
@@ -156,7 +169,6 @@ export default function DashboardPage() {
             </Popover>
           )}
 
-          {/* City Filter (admin only) */}
           {isAdmin && (
             <Select value={selectedCity} onValueChange={setSelectedCity}>
               <SelectTrigger className="w-48 bg-card border shadow-sm">
@@ -227,88 +239,138 @@ export default function DashboardPage() {
         {isAdmin && (
           <StatCard
             title="Stock Bajo"
-            value={stats.lowStockCount}
+            value={lowStockCount}
             icon={AlertTriangle}
-            color={stats.lowStockCount > 0 ? "text-orange-500" : "text-muted-foreground"}
+            color={lowStockCount > 0 ? "text-orange-500" : "text-muted-foreground"}
             desc="Productos bajo mínimo"
           />
         )}
       </div>
 
-      {/* Charts & Tables row */}
+      {/* Charts & Tables — admin only */}
       {isAdmin && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Bar chart: ventas por ciudad */}
-          <Card className="border-none shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-bold uppercase text-muted-foreground">Ventas por Ciudad</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {cityChartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={cityChartData} margin={{ top: 4, right: 4, left: 0, bottom: 4 }}>
-                    <XAxis dataKey="city" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                    <YAxis
-                      tick={{ fontSize: 11 }}
-                      axisLine={false}
-                      tickLine={false}
-                      tickFormatter={v => `$${(v / 1000).toFixed(0)}k`}
-                    />
-                    <Tooltip
-                      formatter={(v: number) => [`$${v.toLocaleString()}`, 'Total']}
-                      contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}
-                    />
-                    <Bar dataKey="total" radius={[6, 6, 0, 0]}>
-                      {cityChartData.map((_, i) => (
-                        <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-[220px] flex items-center justify-center text-muted-foreground text-sm italic">
-                  Sin datos para el periodo
-                </div>
-              )}
-            </CardContent>
-          </Card>
+        <div className="space-y-6">
 
-          {/* Seller performance table */}
+          {/* Bar chart + Seller performance */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+            <Card className="border-none shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-bold uppercase text-muted-foreground">Ventas por Ciudad</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {cityChartData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={cityChartData} margin={{ top: 4, right: 4, left: 0, bottom: 4 }}>
+                      <XAxis dataKey="city" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                      <YAxis
+                        tick={{ fontSize: 11 }}
+                        axisLine={false}
+                        tickLine={false}
+                        tickFormatter={v => `$${(v / 1000).toFixed(0)}k`}
+                      />
+                      <Tooltip
+                        formatter={(v: number) => [`$${v.toLocaleString()}`, 'Total']}
+                        contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}
+                      />
+                      <Bar dataKey="total" radius={[6, 6, 0, 0]}>
+                        {cityChartData.map((_, i) => (
+                          <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-[220px] flex items-center justify-center text-muted-foreground text-sm italic">
+                    Sin datos para el periodo
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border-none shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-bold uppercase text-muted-foreground flex items-center gap-2">
+                  <Users className="w-4 h-4" /> Rendimiento Vendedores
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                {sellerRows.length > 0 ? (
+                  <div className="divide-y">
+                    {sellerRows.map(row => (
+                      <div key={row.seller.id} className="flex items-center justify-between px-6 py-3 hover:bg-muted/30 transition-colors">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-black shrink-0">
+                            {row.seller.name.charAt(0)}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold truncate">{row.seller.name}</p>
+                            <p className="text-[10px] text-muted-foreground">{row.seller.city}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4 text-right shrink-0">
+                          <div>
+                            <p className="text-[10px] text-muted-foreground">Ventas</p>
+                            <p className="text-xs font-black">${row.totalVenta.toLocaleString()}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-muted-foreground">Pendiente</p>
+                            <p className="text-xs font-black text-green-600">${row.pendiente.toLocaleString()}</p>
+                          </div>
+                          <div className="flex flex-col items-end gap-1">
+                            {row.activas > 0 && (
+                              <Badge className="text-[9px] h-4 px-1.5 bg-orange-100 text-orange-700 border-0">{row.activas} activas</Badge>
+                            )}
+                            {row.fallidas > 0 && (
+                              <Badge className="text-[9px] h-4 px-1.5 bg-red-100 text-red-700 border-0">{row.fallidas} fallidas</Badge>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="py-12 text-center text-muted-foreground text-sm italic">
+                    Sin actividad en el periodo
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+          </div>
+
+          {/* Delivery performance */}
           <Card className="border-none shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-bold uppercase text-muted-foreground flex items-center gap-2">
-                <Users className="w-4 h-4" /> Rendimiento Vendedores
+                <Truck className="w-4 h-4" /> Rendimiento Repartidores
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
-              {sellerRows.length > 0 ? (
+              {deliveryRows.length > 0 ? (
                 <div className="divide-y">
-                  {sellerRows.map(row => (
-                    <div key={row.seller.id} className="flex items-center justify-between px-6 py-3 hover:bg-muted/30 transition-colors">
+                  {deliveryRows.map(row => (
+                    <div key={row.dp.id} className="flex items-center justify-between px-6 py-3 hover:bg-muted/30 transition-colors">
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-black shrink-0">
-                          {row.seller.name.charAt(0)}
+                        <div className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center text-xs font-black shrink-0">
+                          {row.dp.name.charAt(0)}
                         </div>
                         <div className="min-w-0">
-                          <p className="text-xs font-bold truncate">{row.seller.name}</p>
-                          <p className="text-[10px] text-muted-foreground">{row.seller.city}</p>
+                          <p className="text-xs font-bold truncate">{row.dp.name}</p>
+                          <p className="text-[10px] text-muted-foreground">{row.dp.city}</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-4 text-right shrink-0">
                         <div>
-                          <p className="text-[10px] text-muted-foreground">Ventas</p>
-                          <p className="text-xs font-black">${row.totalVenta.toLocaleString()}</p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] text-muted-foreground">Pendiente</p>
-                          <p className="text-xs font-black text-green-600">${row.pendiente.toLocaleString()}</p>
+                          <p className="text-[10px] text-muted-foreground">Entregados</p>
+                          <p className="text-xs font-black text-green-600">{row.entregados}</p>
                         </div>
                         <div className="flex flex-col items-end gap-1">
-                          {row.activas > 0 && (
-                            <Badge className="text-[9px] h-4 px-1.5 bg-orange-100 text-orange-700 border-0">{row.activas} activas</Badge>
+                          {row.activos > 0 && (
+                            <Badge className="text-[9px] h-4 px-1.5 bg-orange-100 text-orange-700 border-0">{row.activos} activos</Badge>
                           )}
-                          {row.fallidas > 0 && (
-                            <Badge className="text-[9px] h-4 px-1.5 bg-red-100 text-red-700 border-0">{row.fallidas} fallidas</Badge>
+                          {row.fallidos > 0 && (
+                            <Badge className="text-[9px] h-4 px-1.5 bg-red-100 text-red-700 border-0">{row.fallidos} fallidos</Badge>
                           )}
                         </div>
                       </div>
@@ -322,6 +384,7 @@ export default function DashboardPage() {
               )}
             </CardContent>
           </Card>
+
         </div>
       )}
 
@@ -345,26 +408,27 @@ export default function DashboardPage() {
                   return qty > 0 || hasActiveAssignment;
                 })
                 .map(p => {
-                const inv = inventory.find(i => i.productId === p.id && i.sellerId === currentUser.id);
-                const qty = inv?.quantity ?? 0;
-                const minStock = p.minStock ?? 4;
-                return (
-                  <div key={p.id} className={cn(
-                    "p-3 rounded-xl border",
-                    qty === 0 ? "bg-muted/30 border-dashed" : qty <= minStock ? "bg-orange-50 border-orange-200" : "bg-card"
-                  )}>
-                    <p className="text-xs font-bold truncate">{p.name}</p>
-                    <p className={cn("text-2xl font-black mt-1", qty === 0 ? "text-muted-foreground/30" : qty <= minStock ? "text-orange-500" : "text-foreground")}>
-                      {qty}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground">unidades</p>
-                  </div>
-                );
-              })}
+                  const inv = inventory.find(i => i.productId === p.id && i.sellerId === currentUser.id);
+                  const qty = inv?.quantity ?? 0;
+                  const minStock = p.minStock ?? 4;
+                  return (
+                    <div key={p.id} className={cn(
+                      "p-3 rounded-xl border",
+                      qty === 0 ? "bg-muted/30 border-dashed" : qty <= minStock ? "bg-orange-50 border-orange-200" : "bg-card"
+                    )}>
+                      <p className="text-xs font-bold truncate">{p.name}</p>
+                      <p className={cn("text-2xl font-black mt-1", qty === 0 ? "text-muted-foreground/30" : qty <= minStock ? "text-orange-500" : "text-foreground")}>
+                        {qty}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">unidades</p>
+                    </div>
+                  );
+                })}
             </div>
           </CardContent>
         </Card>
       )}
+
     </div>
   );
 }

@@ -8,12 +8,11 @@ import {
   mapSale, mapSettlement, mapKardex
 } from '@/lib/supabase/mappers';
 import type {
-  UserProfile, Product, InventoryItem, Sale, SaleStatus,
+  UserProfile, NewUserPayload, Product, InventoryItem, Sale, SaleStatus,
   InventoryAssignment, WeeklySettlement, SaleDetail,
   MovementType, MovementReason, AssignmentStatus, KardexEntry
 } from '@/lib/types';
 
-const DEFAULT_PAYMENT_INFO = "Banco: Central Bank\nCuenta: 1234-5678-9012\nTitular: Admin SalesDesk\nAlias: ventas.muebles.ok";
 const MIN_STOCK_DEFAULT = 4;
 
 function newId(): string {
@@ -40,7 +39,9 @@ export function useStore() {
   const [sales, setSales] = useState<Sale[]>([]);
   const [settlements, setSettlements] = useState<WeeklySettlement[]>([]);
   const [kardex, setKardex] = useState<KardexEntry[]>([]);
-  const [paymentInfo, setPaymentInfo] = useState(DEFAULT_PAYMENT_INFO);
+  const [kardexPage, setKardexPage] = useState(0);
+  const [kardexHasMore, setKardexHasMore] = useState(true);
+  const [paymentInfo, setPaymentInfo] = useState('');
 
   // ─── Cargar perfil cuando cambia la sesión ────────────────────────────────
   useEffect(() => {
@@ -56,7 +57,7 @@ export function useStore() {
       setSales([]);
       setSettlements([]);
       setKardex([]);
-      setPaymentInfo(DEFAULT_PAYMENT_INFO);
+      setPaymentInfo('');
       return;
     }
 
@@ -122,21 +123,43 @@ export function useStore() {
       );
     };
 
-    const fetchSettlements = () => {
+    const fetchSettlements = async () => {
+      if (role === 'delivery') {
+        const { data: linked } = await supabase
+          .from('orders')
+          .select('settlement_id')
+          .eq('delivery_person_id', uid)
+          .not('settlement_id', 'is', null);
+
+        const ids = [...new Set((linked ?? []).map(r => r.settlement_id as string))];
+
+        if (ids.length === 0) { setSettlements([]); return; }
+
+        const { data } = await supabase
+          .from('settlements')
+          .select('*')
+          .in('id', ids)
+          .order('created_at', { ascending: false });
+
+        setSettlements(data?.map(mapSettlement) ?? []);
+        return;
+      }
+
       const q = supabase.from('settlements').select('*').order('created_at', { ascending: false });
       const filtered = role === 'seller' ? q.eq('seller_id', uid) : q;
-      return filtered.then(({ data }) =>
-        setSettlements(data?.map(mapSettlement) ?? [])
-      );
+      const { data } = await filtered;
+      setSettlements(data?.map(mapSettlement) ?? []);
     };
 
     const fetchKardex = () => {
       if (role === 'delivery') return;
       const q = supabase.from('kardex_entries').select('*').order('created_at', { ascending: false });
-      const filtered = role === 'seller' ? q.eq('seller_id', uid).limit(200) : q.limit(500);
-      return filtered.then(({ data }) =>
-        setKardex(data?.map(mapKardex) ?? [])
-      );
+      const filtered = role === 'seller' ? q.eq('seller_id', uid).range(0, 99) : q.range(0, 99);
+      return filtered.then(({ data }) => {
+        setKardex(data?.map(mapKardex) ?? []);
+        setKardexPage(0);
+        setKardexHasMore((data?.length ?? 0) === 100);
+      });
     };
 
     const fetchConfig = () =>
@@ -161,16 +184,16 @@ export function useStore() {
 
     const channel = supabase
       .channel(channelName)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' },             () => fetchProducts())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' },             () => fetchUsers())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_items' },      () => fetchInventory())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_assignments' },() => fetchAssignments())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' },               () => fetchSales())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' },          () => fetchSales())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_events' },         () => fetchSales())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'settlements' },          () => fetchSettlements())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'kardex_entries' },       () => fetchKardex())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'app_config' },           () => fetchConfig())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' },             () => { try { fetchProducts();    } catch(e) { console.error('[realtime] products:', e);    } })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' },             () => { try { fetchUsers();       } catch(e) { console.error('[realtime] profiles:', e);    } })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_items' },      () => { try { fetchInventory();   } catch(e) { console.error('[realtime] inventory:', e);   } })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_assignments' },() => { try { fetchAssignments(); } catch(e) { console.error('[realtime] assignments:', e); } })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' },               () => { try { fetchSales();       } catch(e) { console.error('[realtime] orders:', e);      } })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' },          () => { try { fetchSales();       } catch(e) { console.error('[realtime] order_items:', e); } })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_events' },         () => { try { fetchSales();       } catch(e) { console.error('[realtime] order_events:', e);} })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'settlements' },          () => { try { fetchSettlements(); } catch(e) { console.error('[realtime] settlements:', e); } })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'kardex_entries' },       () => { try { fetchKardex();      } catch(e) { console.error('[realtime] kardex:', e);      } })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'app_config' },           () => { try { fetchConfig();      } catch(e) { console.error('[realtime] app_config:', e);  } })
       .subscribe();
 
     return () => {
@@ -253,17 +276,27 @@ export function useStore() {
     googleMapsLink?: string,
     photoUrl?: string
   ) => {
-    // Validación no bloqueante: advertir si stock insuficiente pero continuar
+    if (sellerId !== user?.id) {
+      toast({ variant: 'destructive', title: 'No autorizado', description: 'No puedes registrar ventas para otro usuario.' });
+      return;
+    }
+    // Validación bloqueante: recolectar todos los errores de stock antes de insertar
+    const stockErrors: string[] = [];
     for (const item of items) {
       const invItem = inventory.find(i => i.productId === item.productId && i.sellerId === sellerId);
       const available = invItem?.quantity ?? 0;
       if (available < item.quantity) {
         const prod = products.find(p => p.id === item.productId);
-        toast({
-          title: '⚠️ Stock insuficiente',
-          description: `${prod?.name || 'Producto'}: disponible ${available}, solicitado ${item.quantity}. La venta se registra de todas formas.`
-        });
+        stockErrors.push(`${prod?.name || 'Producto'}: disponible ${available}, solicitado ${item.quantity}`);
       }
+    }
+    if (stockErrors.length > 0) {
+      toast({
+        variant: 'destructive',
+        title: 'Stock insuficiente',
+        description: stockErrors.join(' · '),
+      });
+      return;
     }
 
     const saleId = newId();
@@ -311,7 +344,12 @@ export function useStore() {
         subtotal:           item.subtotal,
       }))
     );
-    if (itemsErr) console.error('[registerMultiSale] INSERT order_items:', itemsErr.message);
+    if (itemsErr) {
+      console.error('[registerMultiSale] INSERT order_items:', itemsErr.message);
+      await supabase.from('orders').delete().eq('id', saleId);
+      toast({ variant: 'destructive', title: 'Error al crear venta', description: itemsErr.message });
+      return;
+    }
 
     // 3. INSERT evento inicial
     supabase.from('order_events').insert({
@@ -332,8 +370,9 @@ export function useStore() {
           .update({ quantity: newQty })
           .eq('id', invItem.id);
 
-
-        logKardex(item.productId, sellerId, 'subtraction', 'sale', item.quantity, `Venta #${saleId.slice(0,8)}`, saleId);
+        if (!invErr) {
+          logKardex(item.productId, sellerId, 'subtraction', 'sale', item.quantity, `Venta #${saleId.slice(0,8)}`, saleId);
+        }
 
         const prod = products.find(p => p.id === item.productId);
         const minStock = prod?.minStock ?? MIN_STOCK_DEFAULT;
@@ -366,9 +405,28 @@ export function useStore() {
     if (data) setSales(data.map(mapSale));
   };
 
+  const VALID_TRANSITIONS: Record<SaleStatus, SaleStatus[]> = {
+    assigned:           ['accepted', 'cancelled'],
+    accepted:           ['contacting', 'cancelled'],
+    contacting:         ['scheduled', 'cancelled'],
+    scheduled:          ['in_transit', 'cancelled'],
+    in_transit:         ['delivered', 'delivery_failed', 'pending_return'],
+    delivered:          ['delivery_confirmed', 'paid'],
+    delivery_confirmed: ['paid'],
+    pending_return:     ['cancelled'],
+    delivery_failed:    ['pending_return', 'cancelled'],
+    paid:               [],
+    cancelled:          [],
+  };
+
   const updateSaleStatus = async (saleId: string, status: SaleStatus, data?: { note?: string, deliveryDate?: string, deliveryTime?: string }) => {
     const sale = sales.find(s => s.id === saleId);
     if (!sale) return;
+
+    if (!VALID_TRANSITIONS[sale.status]?.includes(status)) {
+      toast({ variant: 'destructive', title: 'Transición de estado inválida', description: `No se puede pasar de '${sale.status}' a '${status}'.` });
+      return;
+    }
 
     const eventTypeMap: Record<SaleStatus, string> = {
       assigned: 'assignment', accepted: 'acceptance', contacting: 'assignment',
@@ -401,6 +459,7 @@ export function useStore() {
     // Stock se devuelve SOLO al cancelar directamente — no al marcar como fallido
     // pending_return espera la decisión explícita del admin/vendedor
     if (status === 'cancelled') {
+      if (sale.status === 'cancelled') return;
       for (const item of sale.items) {
         const invItem = inventory.find(i => i.productId === item.productId && i.sellerId === sale.sellerId);
         if (invItem) {
@@ -413,17 +472,17 @@ export function useStore() {
     await refetchSales();
   };
 
-  const confirmDelivery = async (saleId: string, deliveryPhotoBase64: string) => {
-    const { error } = await supabase.from('orders').update({
-      status: 'delivered',
-      delivery_photo_url: deliveryPhotoBase64,
-    }).eq('id', saleId);
+  const confirmDelivery = async (saleId: string, note?: string) => {
+    const updateData: Record<string, unknown> = { status: 'delivered' };
+    if (note?.trim()) updateData.notes = note.trim();
+
+    const { error } = await supabase.from('orders').update(updateData).eq('id', saleId);
     if (error) { toast({ variant: 'destructive', title: 'Error', description: error.message }); return; }
 
     supabase.from('order_events').insert({
       order_id: saleId, type: 'delivery',
       user_id: user?.id ?? null, user_name: currentUser?.name ?? 'Sistema',
-      note: 'Entrega confirmada con evidencia fotográfica',
+      note: note?.trim() ? `Entrega confirmada — ${note.trim()}` : 'Entrega confirmada',
     });
 
     await refetchSales();
@@ -480,6 +539,7 @@ export function useStore() {
   const cancelFailedOrder = async (saleId: string) => {
     const sale = sales.find(s => s.id === saleId);
     if (!sale) return;
+    if (sale.status === 'cancelled') return;
 
     // Devolver cada producto al inventario del vendedor
     for (const item of sale.items) {
@@ -538,17 +598,42 @@ export function useStore() {
     const sale = sales.find(s => s.id === saleId);
     if (!sale) return;
 
-    for (const item of sale.items) {
-      const invItem = inventory.find(i => i.productId === item.productId && i.sellerId === sale.sellerId);
-      if (invItem) {
-        await supabase.from('inventory_items').update({ quantity: invItem.quantity + item.quantity }).eq('id', invItem.id);
-      }
+    if (sale.settlementId) {
+      toast({ variant: 'destructive', title: 'No se puede eliminar', description: 'No se puede eliminar un pedido que ya fue liquidado.' });
+      return;
     }
 
-    const { error } = await supabase.from('orders').delete().eq('id', saleId);
-    if (error) { toast({ variant: 'destructive', title: 'Error', description: error.message }); return; }
-    toast({ title: 'Venta eliminada', description: 'El stock ha sido devuelto al vendedor.' });
+    // Devolver stock ANTES del DELETE para no perder los datos si algo falla.
+    // 'cancelled' ya devolvió stock en updateSaleStatus/cancelFailedOrder — no volver a sumar.
+    const RETURN_STOCK_STATUSES = ['assigned', 'accepted', 'contacting', 'scheduled', 'in_transit', 'delivery_failed', 'pending_return'];
+    let stockReturned = false;
+    if (RETURN_STOCK_STATUSES.includes(sale.status)) {
+      for (const item of sale.items) {
+        const invItem = inventory.find(i => i.productId === item.productId && i.sellerId === sale.sellerId);
+        if (invItem) {
+          await supabase.from('inventory_items').update({ quantity: invItem.quantity + item.quantity }).eq('id', invItem.id);
+        } else {
+          await supabase.from('inventory_items').insert({
+            id: newId(), product_id: item.productId, seller_id: sale.sellerId, quantity: item.quantity,
+          });
+        }
+        logKardex(item.productId, sale.sellerId, 'addition', 'return', item.quantity, `Eliminación pedido #${saleId.slice(0, 8)}`, saleId);
+      }
+      stockReturned = true;
+    }
+
+    const { error, count } = await supabase.from('orders').delete({ count: 'exact' }).eq('id', saleId);
+    if (error || count === 0) {
+      toast({ variant: 'destructive', title: 'Error al eliminar', description: error?.message ?? 'Sin permiso para eliminar esta venta.' });
+      return;
+    }
+
+    toast({
+      title: 'Venta eliminada',
+      description: stockReturned ? 'El stock ha sido devuelto al vendedor.' : undefined,
+    });
     await refetchSales();
+    await refetchInventory();
   };
 
   // ─── Liquidaciones ────────────────────────────────────────────────────────
@@ -578,9 +663,11 @@ export function useStore() {
       if (linkErr) console.error('[reportSettlement] link orders error:', linkErr.message);
     }
     toast({ title: 'Depósito reportado', description: 'Enviado para validación.' });
+    await refetchSales();
   };
 
   const confirmSettlement = async (settlementId: string) => {
+    if (currentUser?.role !== 'admin') { toast({ variant: 'destructive', title: 'No autorizado' }); return; }
     const { error } = await supabase
       .from('settlements')
       .update({ status: 'confirmed', confirmed_at: new Date().toISOString() })
@@ -590,13 +677,53 @@ export function useStore() {
       return;
     }
     // Marcar todas las órdenes vinculadas como pagadas
-    await supabase
+    const { error: ordersErr } = await supabase
       .from('orders')
       .update({ status: 'paid' })
       .eq('settlement_id', settlementId)
       .neq('status', 'paid');
+
+    if (ordersErr) {
+      await supabase.from('settlements')
+        .update({ status: 'reported', confirmed_at: null })
+        .eq('id', settlementId);
+      toast({ variant: 'destructive', title: 'Error al confirmar', description: 'No se pudieron actualizar las órdenes. Intenta de nuevo.' });
+      await refetchSettlements();
+      return;
+    }
     toast({ title: 'Liquidación confirmada', description: 'Las ventas quedaron marcadas como pagadas.' });
     await refetchSales();
+    await refetchSettlements();
+  };
+
+  const rejectSettlement = async (settlementId: string, reason: string) => {
+    if (currentUser?.role !== 'admin') { toast({ variant: 'destructive', title: 'No autorizado' }); return; }
+    const { error } = await supabase
+      .from('settlements')
+      .update({ status: 'rejected', rejection_reason: reason })
+      .eq('id', settlementId);
+    if (error) {
+      toast({ variant: 'destructive', title: 'Error al rechazar', description: error.message });
+      return;
+    }
+    await supabase
+      .from('orders')
+      .update({ settlement_id: null })
+      .eq('settlement_id', settlementId)
+      .neq('status', 'paid');
+    toast({ title: 'Liquidación rechazada', description: 'Los pedidos vuelven a estar disponibles.' });
+    await refetchSales();
+    await refetchSettlements();
+  };
+
+  const refetchSettlements = async () => {
+    if (!user || !currentUser) return;
+    const uid = user.id;
+    const role = currentUser.role;
+    const q = supabase.from('settlements').select('*').order('created_at', { ascending: false });
+    const filtered = role === 'seller' || role === 'delivery' ? q.eq('seller_id', uid) : q;
+    const { data } = await filtered;
+    if (data) setSettlements(data.map(mapSettlement));
   };
 
   // ─── Refetch de inventario (reutilizable desde mutations) ──────────────────
@@ -619,6 +746,7 @@ export function useStore() {
   // ─── Inventario ───────────────────────────────────────────────────────────
 
   const assignInventory = async (productId: string, sellerId: string, quantity: number) => {
+    if (currentUser?.role !== 'admin') { toast({ variant: 'destructive', title: 'No autorizado' }); return; }
     const id = newId();
     const payload = {
       id, product_id: productId, seller_id: sellerId, quantity,
@@ -753,7 +881,7 @@ export function useStore() {
 
   // ─── Usuarios ─────────────────────────────────────────────────────────────
 
-  const addUser = async (u: any) => {
+  const addUser = async (u: NewUserPayload) => {
     const { password, ...userData } = u;
     const email = userData.username.includes('@') ? userData.username : `${userData.username}@salesdesk.com`;
 
@@ -788,31 +916,66 @@ export function useStore() {
     }
   };
 
-  const updateUser = (u: UserProfile) => {
-    supabase.from('profiles').update({
-      name: u.name, username: u.username, email: u.email ?? null,
-      phone: u.phone ?? null, whatsapp: u.whatsapp ?? null, city: u.city,
-      role: u.role, is_active: u.isActive,
-      settlement_frequency: u.settlementFrequency,
-      settlement_start_day: u.settlementStartDay,
-    }).eq('id', u.id);
+  const updateUser = async (u: UserProfile) => {
+    if (currentUser?.role !== 'admin' && u.id !== currentUser?.id) {
+      toast({ variant: 'destructive', title: 'No autorizado' }); return;
+    }
+    try {
+      const { error } = await supabase.from('profiles').update({
+        name: u.name, username: u.username, email: u.email ?? null,
+        phone: u.phone ?? null, whatsapp: u.whatsapp ?? null, city: u.city,
+        role: u.role, is_active: u.isActive,
+        settlement_frequency: u.settlementFrequency,
+        settlement_start_day: u.settlementStartDay,
+      }).eq('id', u.id);
+      if (error) throw error;
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Error al actualizar usuario', description: error.message });
+    }
   };
 
-  const deleteUser = (id: string) => {
-    supabase.from('profiles').delete().eq('id', id);
+  const deleteUser = async (id: string) => {
+    if (currentUser?.role !== 'admin') { toast({ variant: 'destructive', title: 'No autorizado' }); return; }
+    if (id === currentUser?.id) { toast({ variant: 'destructive', title: 'No puedes eliminar tu propia cuenta' }); return; }
+    try {
+      const { error } = await supabase.from('profiles').delete().eq('id', id);
+      if (error) throw error;
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Error al eliminar usuario', description: error.message });
+    }
   };
 
   // ─── Configuración ────────────────────────────────────────────────────────
 
-  const updatePaymentInfo = (info: string) => {
-    supabase.from('app_config').upsert({ key: 'payment_info', value: info }, { onConflict: 'key' });
-    setPaymentInfo(info);
+  const loadMoreKardex = async () => {
+    if (!user || !currentUser || currentUser.role === 'delivery') return;
+    const nextPage = kardexPage + 1;
+    const start = nextPage * 100;
+    const q = supabase.from('kardex_entries').select('*').order('created_at', { ascending: false });
+    const filtered = currentUser.role === 'seller'
+      ? q.eq('seller_id', user.id).range(start, start + 99)
+      : q.range(start, start + 99);
+    const { data } = await filtered;
+    setKardex(prev => [...prev, ...(data?.map(mapKardex) ?? [])]);
+    setKardexPage(nextPage);
+    setKardexHasMore((data?.length ?? 0) === 100);
+  };
+
+  const updatePaymentInfo = async (info: string) => {
+    try {
+      const { error } = await supabase
+        .from('app_config').upsert({ key: 'payment_info', value: info }, { onConflict: 'key' });
+      if (error) throw error;
+      setPaymentInfo(info);
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Error al guardar información de pago', description: error.message });
+    }
   };
 
   // ─── Return ───────────────────────────────────────────────────────────────
 
   return {
-    users, products, inventory, assignments, sales, settlements, kardex,
+    users, products, inventory, assignments, sales, settlements, kardex, kardexHasMore,
     paymentInfo, currentUser, user, isProfileLoading,
     login, logout, seedInitialAdmin,
     addProduct, updateProduct, deleteProduct,
@@ -820,7 +983,7 @@ export function useStore() {
     assignInventory, updateAssignmentStatus, adjustInventory,
     registerMultiSale, updateSaleStatus, confirmDelivery, deleteSale,
     assignDeliveryPerson, reportDeliveryFailure, cancelFailedOrder, retryDelivery,
-    reportSettlement, confirmSettlement,
-    updatePaymentInfo,
+    reportSettlement, confirmSettlement, rejectSettlement,
+    updatePaymentInfo, loadMoreKardex,
   };
 }
