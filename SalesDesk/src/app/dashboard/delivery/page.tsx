@@ -15,7 +15,7 @@ import {
   Truck, CheckCircle2, XCircle, MapPin, User, Phone,
   Package, ExternalLink, Copy, ArrowLeft, Calendar, Clock,
   AlertTriangle, ChevronRight, ShoppingCart, MessageSquare,
-  TrendingUp, Wallet, Camera, Send, DollarSign
+  TrendingUp, Wallet, Camera, Send, DollarSign, ChevronLeft
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
@@ -31,7 +31,6 @@ const FAILURE_REASONS = [
   'Otro',
 ];
 
-// Pasos del tracker — igual visualmente, etiquetas actualizadas
 const TRACKING_STEPS = [
   { label: 'Recibido',   key: 'received'  },
   { label: 'Confirmado', key: 'confirmed' },
@@ -39,16 +38,14 @@ const TRACKING_STEPS = [
   { label: 'Entregado',  key: 'delivered' },
 ];
 
-// Mapeo estados DB (order_status enum de supabase.md) → paso visual
 function getTrackingStep(status: string): number {
-  if (status === 'assigned')                            return 0; // asignado, sin confirmar
-  if (['accepted', 'contacting'].includes(status))      return 1; // confirmó recepción
-  if (['scheduled', 'in_transit'].includes(status))     return 2; // en ruta
-  if (['delivered', 'delivery_confirmed', 'paid'].includes(status)) return 3; // entregado
+  if (status === 'assigned')                            return 0;
+  if (['accepted', 'contacting'].includes(status))      return 1;
+  if (['scheduled', 'in_transit'].includes(status))     return 2;
+  if (['delivered', 'delivery_confirmed', 'paid'].includes(status)) return 3;
   return 0;
 }
 
-// Botón dinámico: siguiente paso disponible según estado actual
 function getNextStep(status: string): { label: string; nextStatus: SaleStatus } | null {
   switch (status) {
     case 'assigned':   return { label: 'Confirmar Pedido Recibido', nextStatus: 'accepted'   };
@@ -58,6 +55,19 @@ function getNextStep(status: string): { label: string; nextStatus: SaleStatus } 
     case 'in_transit': return { label: 'Marcar como Entregado',     nextStatus: 'delivered'  };
     default:           return null;
   }
+}
+
+function getWeekBounds(offset: number): { start: Date; end: Date } {
+  const now = new Date();
+  const day = now.getDay();
+  const daysToMonday = day === 0 ? -6 : 1 - day;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + daysToMonday + offset * 7);
+  monday.setHours(0, 0, 0, 0);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23, 59, 59, 999);
+  return { start: monday, end: sunday };
 }
 
 export default function DeliveryPage() {
@@ -70,6 +80,7 @@ export default function DeliveryPage() {
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [deliveryOutcome, setDeliveryOutcome] = useState<'entregado' | 'no_lo_quiere' | 'rechazado' | null>(null);
   const [deliveryComment, setDeliveryComment] = useState('');
+  const [weekOffset, setWeekOffset] = useState(0);
 
   // Settlement states
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
@@ -82,25 +93,45 @@ export default function DeliveryPage() {
     [sales, currentUser?.id]
   );
 
-  const pendingSales = mySales.filter(s => !['delivered', 'delivery_confirmed', 'paid', 'cancelled', 'delivery_failed'].includes(s.status));
-  const completedSales = mySales.filter(s => ['delivered', 'delivery_confirmed', 'paid'].includes(s.status));
-  const failedSales = mySales.filter(s => s.status === 'delivery_failed');
+  // ── Semana seleccionada ──────────────────────────────────────────────────
+  const weekBounds = useMemo(() => getWeekBounds(weekOffset), [weekOffset]);
+
+  const weekLabel = useMemo(() => {
+    if (weekOffset === 0) return 'Esta semana';
+    if (weekOffset === -1) return 'Semana pasada';
+    const { start, end } = weekBounds;
+    const fmt = (d: Date) => d.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' });
+    return `${fmt(start)} – ${fmt(end)}`;
+  }, [weekOffset, weekBounds]);
+
+  // Pedidos de la semana seleccionada (para el dashboard de entregas)
+  const weekSales = useMemo(() => mySales.filter(s => {
+    const d = new Date(s.createdAt);
+    return d >= weekBounds.start && d <= weekBounds.end;
+  }), [mySales, weekBounds]);
+
+  // Listas por estado — filtradas por semana (para tabs y contadores)
+  const pendingSales = weekSales.filter(s => !['delivered', 'delivery_confirmed', 'paid', 'cancelled', 'delivery_failed'].includes(s.status));
+  const completedSalesWeek = weekSales.filter(s => ['delivered', 'delivery_confirmed', 'paid'].includes(s.status));
+  const failedSalesWeek = weekSales.filter(s => s.status === 'delivery_failed');
+
+  // Completadas ALL TIME — solo para tab Liquidar (intacto)
+  const completedSalesAll = mySales.filter(s => ['delivered', 'delivery_confirmed', 'paid'].includes(s.status));
 
   const financials = useMemo(() => {
     const todayStr = new Date().toLocaleDateString('en-CA');
-    const todayCount = completedSales.filter(
+    const todayCount = completedSalesWeek.filter(
       s => new Date(s.createdAt).toLocaleDateString('en-CA') === todayStr
     ).length;
-    const unsettled = completedSales.filter(s => !s.settlementId);
-    const comision = unsettled.reduce((sum, s) => sum + s.totalComision, 0);
-    const deposito = unsettled.reduce((sum, s) => sum + s.totalDeposito, 0);
-    const totalVenta = completedSales.reduce((sum, s) => sum + s.totalVenta, 0);
-    return { todayCount, comision, deposito, unsettledCount: unsettled.length, totalVenta };
-  }, [completedSales]);
+    const totalVenta = completedSalesWeek.reduce((sum, s) => sum + s.totalVenta, 0);
+    const comision = completedSalesWeek.reduce((sum, s) => sum + s.totalComision, 0);
+    return { todayCount, totalVenta, comision };
+  }, [completedSalesWeek]);
 
+  // ── Tab Liquidar — sin cambios ───────────────────────────────────────────
   const unsettledDeliveries = useMemo(
-    () => completedSales.filter(s => !s.settlementId),
-    [completedSales]
+    () => completedSalesAll.filter(s => !s.settlementId),
+    [completedSalesAll]
   );
 
   const selectedUnsettled = useMemo(
@@ -242,7 +273,6 @@ export default function DeliveryPage() {
 
     return (
       <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
-        {/* Modal: resultado de la entrega */}
         <Dialog open={confirmDialogOpen} onOpenChange={(open) => { if (!open) closeConfirmDialog(); }}>
           <DialogContent>
             <DialogHeader>
@@ -321,7 +351,6 @@ export default function DeliveryPage() {
           </div>
         </div>
 
-        {/* Tracking 4 pasos */}
         <Card className="border-none shadow-sm rounded-2xl overflow-hidden">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-bold text-muted-foreground">Seguimiento del pedido</CardTitle>
@@ -374,7 +403,6 @@ export default function DeliveryPage() {
           </CardContent>
         </Card>
 
-        {/* Acciones — botón dinámico según estado actual */}
         {!isFailed && !isCompleted && (() => {
           const next = getNextStep(selectedSale.status);
           if (!next) return null;
@@ -455,7 +483,6 @@ export default function DeliveryPage() {
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Datos del cliente */}
           <Card className="border-none shadow-sm rounded-2xl">
             <CardHeader>
               <CardTitle className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Datos del Cliente</CardTitle>
@@ -500,7 +527,6 @@ export default function DeliveryPage() {
             </CardContent>
           </Card>
 
-          {/* Productos */}
           <Card className="border-none shadow-sm rounded-2xl">
             <CardHeader>
               <CardTitle className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Productos a Entregar</CardTitle>
@@ -567,11 +593,42 @@ export default function DeliveryPage() {
 
         {/* ── Mis Entregas ─────────────────────────────────────────────────── */}
         <TabsContent value="entregas" className="space-y-6 mt-6">
+
+          {/* Navegación semanal */}
+          <div className="flex items-center justify-between bg-muted/30 rounded-2xl px-4 py-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 rounded-full"
+              onClick={() => setWeekOffset(w => w - 1)}
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </Button>
+            <div className="text-center">
+              <p className="text-sm font-black">{weekLabel}</p>
+              <p className="text-[10px] text-muted-foreground">
+                {weekBounds.start.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}
+                {' – '}
+                {weekBounds.end.toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 rounded-full"
+              disabled={weekOffset >= 0}
+              onClick={() => setWeekOffset(w => Math.min(0, w + 1))}
+            >
+              <ChevronRight className="w-5 h-5" />
+            </Button>
+          </div>
+
+          {/* Contadores superiores — filtrados por semana */}
           <div className="grid grid-cols-3 gap-4">
             {[
-              { label: 'Pendientes', value: pendingSales.length, icon: Clock, color: 'text-orange-500' },
-              { label: 'Entregadas', value: completedSales.length, icon: CheckCircle2, color: 'text-green-600' },
-              { label: 'Fallidas',   value: failedSales.length,   icon: AlertTriangle, color: 'text-red-500' },
+              { label: 'Pendientes', value: pendingSales.length,      icon: Clock,         color: 'text-orange-500' },
+              { label: 'Entregadas', value: completedSalesWeek.length, icon: CheckCircle2,  color: 'text-green-600'  },
+              { label: 'Fallidas',   value: failedSalesWeek.length,    icon: AlertTriangle, color: 'text-red-500'    },
             ].map((s, i) => (
               <Card key={i} className="border-none shadow-sm">
                 <CardContent className="p-4 flex items-center gap-3">
@@ -585,22 +642,28 @@ export default function DeliveryPage() {
             ))}
           </div>
 
-          {/* Resumen financiero */}
+          {/* Resumen financiero — 3 indicadores, filtrados por semana */}
           <Card className="border-none shadow-sm rounded-2xl overflow-hidden">
             <CardHeader className="pb-0 pt-4 px-5">
               <CardTitle className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
-                Resumen Financiero
+                Resumen Financiero — {weekLabel}
               </CardTitle>
             </CardHeader>
             <CardContent className="p-5 pt-3">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div className="flex flex-col gap-1">
                   <div className="flex items-center gap-1.5 text-muted-foreground">
                     <Truck className="w-3.5 h-3.5" />
-                    <span className="text-[10px] font-black uppercase">Entregadas hoy</span>
+                    <span className="text-[10px] font-black uppercase">
+                      {weekOffset === 0 ? 'Entregadas hoy' : 'Entregadas'}
+                    </span>
                   </div>
-                  <p className="text-3xl font-black">{financials.todayCount}</p>
-                  <p className="text-[10px] text-muted-foreground">{completedSales.length} total</p>
+                  <p className="text-3xl font-black">
+                    {weekOffset === 0 ? financials.todayCount : completedSalesWeek.length}
+                  </p>
+                  {weekOffset === 0 && (
+                    <p className="text-[10px] text-muted-foreground">{completedSalesWeek.length} esta semana</p>
+                  )}
                 </div>
                 <div className="flex flex-col gap-1">
                   <div className="flex items-center gap-1.5 text-muted-foreground">
@@ -610,7 +673,6 @@ export default function DeliveryPage() {
                   <p className="text-3xl font-black text-primary">
                     ${financials.totalVenta.toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                   </p>
-                  <p className="text-[10px] text-muted-foreground">acumulado</p>
                 </div>
                 <div className="flex flex-col gap-1">
                   <div className="flex items-center gap-1.5 text-muted-foreground">
@@ -620,31 +682,21 @@ export default function DeliveryPage() {
                   <p className="text-3xl font-black text-green-600">
                     ${financials.comision.toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                   </p>
-                  <p className="text-[10px] text-muted-foreground">sin liquidar</p>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <div className="flex items-center gap-1.5 text-muted-foreground">
-                    <Wallet className="w-3.5 h-3.5" />
-                    <span className="text-[10px] font-black uppercase">Por depositar</span>
-                  </div>
-                  <p className={cn("text-3xl font-black", financials.deposito > 0 ? "text-orange-600" : "text-muted-foreground")}>
-                    ${financials.deposito.toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">a entregar al admin</p>
                 </div>
               </div>
             </CardContent>
           </Card>
 
+          {/* Tabs de pedidos — filtradas por semana */}
           <Tabs defaultValue="pending">
             <TabsList>
               <TabsTrigger value="pending">Pendientes ({pendingSales.length})</TabsTrigger>
-              <TabsTrigger value="completed">Completadas ({completedSales.length})</TabsTrigger>
-              {failedSales.length > 0 && <TabsTrigger value="failed">Fallidas ({failedSales.length})</TabsTrigger>}
+              <TabsTrigger value="completed">Completadas ({completedSalesWeek.length})</TabsTrigger>
+              {failedSalesWeek.length > 0 && <TabsTrigger value="failed">Fallidas ({failedSalesWeek.length})</TabsTrigger>}
             </TabsList>
 
             {(['pending', 'completed', 'failed'] as const).map(tab => {
-              const tabSales = tab === 'pending' ? pendingSales : tab === 'completed' ? completedSales : failedSales;
+              const tabSales = tab === 'pending' ? pendingSales : tab === 'completed' ? completedSalesWeek : failedSalesWeek;
               return (
                 <TabsContent key={tab} value={tab}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
@@ -723,7 +775,7 @@ export default function DeliveryPage() {
                         <ShoppingCart className="w-10 h-10 mx-auto text-muted-foreground/20 mb-3" />
                         <p className="text-muted-foreground italic text-sm">
                           {tab === 'pending' ? 'No tienes entregas pendientes' :
-                           tab === 'completed' ? 'Sin entregas completadas aún' : 'Sin fallos registrados'}
+                           tab === 'completed' ? 'Sin entregas completadas esta semana' : 'Sin fallos esta semana'}
                         </p>
                       </div>
                     )}
@@ -734,9 +786,8 @@ export default function DeliveryPage() {
           </Tabs>
         </TabsContent>
 
-        {/* ── Liquidar ─────────────────────────────────────────────────────── */}
+        {/* ── Liquidar — intacto ────────────────────────────────────────────── */}
         <TabsContent value="liquidar" className="space-y-6 mt-6">
-          {/* Balance summary */}
           <Card className="border-none shadow-sm rounded-2xl overflow-hidden">
             <CardHeader className="pb-0 pt-4 px-5">
               <CardTitle className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
@@ -781,7 +832,6 @@ export default function DeliveryPage() {
             </CardContent>
           </Card>
 
-          {/* Form or all-settled state */}
           {settlementTotals.totalAvailable === 0 ? (
             <Card className="border-none shadow-sm rounded-2xl">
               <CardContent className="py-16 flex flex-col items-center gap-3 text-center">
@@ -905,7 +955,6 @@ export default function DeliveryPage() {
             </Card>
           )}
 
-          {/* Settlement history */}
           {mySettlements.length > 0 && (
             <Card className="border-none shadow-sm rounded-2xl overflow-hidden">
               <CardHeader className="pb-2">

@@ -1,13 +1,15 @@
 
 "use client"
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useStore } from '@/hooks/use-store';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Package, AlertTriangle, CheckCircle2, ArrowUpCircle, ArrowDownCircle } from 'lucide-react';
+import { Package, AlertTriangle, CheckCircle2, ArrowUpCircle, ArrowDownCircle, X, Filter } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -23,7 +25,12 @@ const REASON_LABELS: Record<MovementReason, string> = {
 };
 
 export default function DeliveryInventoryPage() {
-  const { currentUser, inventory, products, assignments, kardex, kardexHasMore, updateAssignmentStatus, loadMoreKardex } = useStore();
+  const { currentUser, inventory, products, assignments, kardex, kardexHasMore, users, updateAssignmentStatus, loadMoreKardex } = useStore();
+
+  const [filterFrom, setFilterFrom]       = useState('');
+  const [filterTo, setFilterTo]           = useState('');
+  const [filterProduct, setFilterProduct] = useState('');
+  const [filterReason, setFilterReason]   = useState('');
 
   const myInventory = inventory.filter(i => i.deliveryPersonId === currentUser?.id);
   const myPendingAssignments = assignments.filter(
@@ -48,6 +55,38 @@ export default function DeliveryInventoryPage() {
   const totalProducts = stockRows.length;
   const totalUnits = stockRows.reduce((s, r) => s + r.quantity, 0);
   const totalAvailable = stockRows.reduce((s, r) => s + r.available, 0);
+
+  // Productos que tienen al menos un movimiento kardex de este repartidor
+  const kardexProducts = useMemo(() => {
+    const ids = new Set(myKardex.map(k => k.productId));
+    return products.filter(p => ids.has(p.id));
+  }, [myKardex, products]);
+
+  const filteredKardex = useMemo(() => {
+    let result = myKardex;
+    if (filterFrom) {
+      const from = new Date(filterFrom);
+      from.setHours(0, 0, 0, 0);
+      result = result.filter(k => new Date(k.createdAt) >= from);
+    }
+    if (filterTo) {
+      const to = new Date(filterTo);
+      to.setHours(23, 59, 59, 999);
+      result = result.filter(k => new Date(k.createdAt) <= to);
+    }
+    if (filterProduct) result = result.filter(k => k.productId === filterProduct);
+    if (filterReason)  result = result.filter(k => k.reason === filterReason);
+    return result;
+  }, [myKardex, filterFrom, filterTo, filterProduct, filterReason]);
+
+  const hasFilters = filterFrom || filterTo || filterProduct || filterReason;
+
+  const clearFilters = () => {
+    setFilterFrom('');
+    setFilterTo('');
+    setFilterProduct('');
+    setFilterReason('');
+  };
 
   const handleConfirm = (assignmentId: string) => {
     updateAssignmentStatus(assignmentId, 'confirmed');
@@ -204,13 +243,76 @@ export default function DeliveryInventoryPage() {
       {/* Historial Kardex */}
       <Card className="border-none shadow-sm">
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-bold uppercase text-muted-foreground">
-            Historial ({myKardex.length})
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-bold uppercase text-muted-foreground flex items-center gap-2">
+              <Filter className="w-4 h-4" /> Historial
+              <span className="text-foreground font-black">
+                {hasFilters
+                  ? `${filteredKardex.length} de ${myKardex.length} movimientos`
+                  : `${myKardex.length} movimientos`}
+              </span>
+            </CardTitle>
+            {hasFilters && (
+              <Button variant="ghost" size="sm" onClick={clearFilters} className="h-7 gap-1 text-xs text-muted-foreground hover:text-foreground">
+                <X className="w-3 h-3" /> Limpiar filtros
+              </Button>
+            )}
+          </div>
+
+          {/* Filtros */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+            <div className="space-y-1">
+              <Label className="text-[10px] font-black uppercase text-muted-foreground">Desde</Label>
+              <Input
+                type="date"
+                value={filterFrom}
+                onChange={e => setFilterFrom(e.target.value)}
+                className="h-9 text-xs"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] font-black uppercase text-muted-foreground">Hasta</Label>
+              <Input
+                type="date"
+                value={filterTo}
+                onChange={e => setFilterTo(e.target.value)}
+                className="h-9 text-xs"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] font-black uppercase text-muted-foreground">Producto</Label>
+              <select
+                value={filterProduct}
+                onChange={e => setFilterProduct(e.target.value)}
+                className="w-full h-9 rounded-md border border-input bg-background px-3 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">Todos</option>
+                {kardexProducts.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] font-black uppercase text-muted-foreground">Tipo</Label>
+              <select
+                value={filterReason}
+                onChange={e => setFilterReason(e.target.value)}
+                className="w-full h-9 rounded-md border border-input bg-background px-3 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">Todos</option>
+                {(Object.entries(REASON_LABELS) as [MovementReason, string][]).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
         </CardHeader>
+
         <CardContent className="p-0">
-          {myKardex.length === 0 ? (
-            <p className="py-10 text-center text-sm text-muted-foreground italic">Sin movimientos registrados.</p>
+          {filteredKardex.length === 0 ? (
+            <p className="py-10 text-center text-sm text-muted-foreground italic">
+              {hasFilters ? 'Sin movimientos con los filtros aplicados.' : 'Sin movimientos registrados.'}
+            </p>
           ) : (
             <Table>
               <TableHeader>
@@ -218,14 +320,18 @@ export default function DeliveryInventoryPage() {
                   <TableHead className="text-[10px] uppercase pl-6">Fecha</TableHead>
                   <TableHead className="text-[10px] uppercase">Producto</TableHead>
                   <TableHead className="text-[10px] uppercase">Tipo</TableHead>
+                  <TableHead className="text-[10px] uppercase">Vendedor</TableHead>
                   <TableHead className="text-[10px] uppercase text-right">Cantidad</TableHead>
                   <TableHead className="text-[10px] uppercase text-right">Antes</TableHead>
                   <TableHead className="text-[10px] uppercase text-right pr-6">Después</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {myKardex.map(entry => {
+                {filteredKardex.map(entry => {
                   const product = products.find(p => p.id === entry.productId);
+                  const sellerName = entry.sellerId
+                    ? (users.find(u => u.id === entry.sellerId)?.name ?? '—')
+                    : '—';
                   const isAddition = entry.type === 'addition';
                   return (
                     <TableRow key={entry.id}>
@@ -241,6 +347,7 @@ export default function DeliveryInventoryPage() {
                           {REASON_LABELS[entry.reason]}
                         </Badge>
                       </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{sellerName}</TableCell>
                       <TableCell className="text-right">
                         <span className={cn("text-xs font-black flex items-center justify-end gap-1", isAddition ? "text-green-600" : "text-red-600")}>
                           {isAddition ? <ArrowUpCircle className="w-3 h-3" /> : <ArrowDownCircle className="w-3 h-3" />}
@@ -256,6 +363,7 @@ export default function DeliveryInventoryPage() {
             </Table>
           )}
         </CardContent>
+
         {kardexHasMore && (
           <div className="flex justify-center p-4 border-t">
             <button

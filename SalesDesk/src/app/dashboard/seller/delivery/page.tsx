@@ -489,12 +489,17 @@ export default function SellerDeliveryPage() {
                               <TableHead className="text-[10px] font-black uppercase pl-4">Venta</TableHead>
                               <TableHead className="text-[10px] font-black uppercase">Cliente</TableHead>
                               <TableHead className="text-[10px] font-black uppercase">Dirección</TableHead>
+                              <TableHead className="text-[10px] font-black uppercase">Vendedor</TableHead>
                               <TableHead className="text-[10px] font-black uppercase">Estado</TableHead>
                               <TableHead className="text-right text-[10px] font-black uppercase pr-4">Acción</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {personSales.map(s => (
+                            {personSales.map(s => {
+                              const sellerName = s.sellerId
+                                ? (users.find(u => u.id === s.sellerId)?.name ?? '—')
+                                : '—';
+                              return (
                               <TableRow key={s.id} className="h-14">
                                 <TableCell className="pl-4">
                                   <button className="text-left group" onClick={() => setDetailSaleId(s.id)}>
@@ -514,6 +519,7 @@ export default function SellerDeliveryPage() {
                                     : <span className="text-[10px] italic text-muted-foreground/50">Sin dirección</span>
                                   }
                                 </TableCell>
+                                <TableCell className="text-xs text-muted-foreground">{sellerName}</TableCell>
                                 <TableCell>
                                   <div className="space-y-1">
                                     <StatusBadge status={s.status} failureReason={s.failureReason} />
@@ -582,7 +588,8 @@ export default function SellerDeliveryPage() {
                                   ) : null}
                                 </TableCell>
                               </TableRow>
-                            ))}
+                              );
+                            })}
                           </TableBody>
                         </Table>
                       </AccordionContent>

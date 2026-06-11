@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useMemo } from 'react';
-import * as XLSX from 'xlsx';
 import { useStore } from '@/hooks/use-store';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -172,8 +171,16 @@ export default function SellerSettlementsPage() {
     setSortOrder('recent');
   };
 
-  const handleExport = () => {
-    const rows = sortedSales.map(s => {
+  const handleExport = async () => {
+    const { default: ExcelJS } = await import('exceljs');
+    const wb = new ExcelJS.Workbook();
+    wb.creator = currentUser?.name ?? 'SalesDesk';
+    wb.created = new Date();
+
+    const ws = wb.addWorksheet('Ventas');
+
+    const tableRows = sortedSales.map(s => {
+      const sellerName = users.find(u => u.id === s.sellerId)?.name ?? currentUser?.name ?? '—';
       const deliveryName = s.deliveryPersonId
         ? (users.find(u => u.id === s.deliveryPersonId)?.name ?? 'Repartidor')
         : 'Sin asignar';
@@ -181,21 +188,58 @@ export default function SellerSettlementsPage() {
         const p = products.find(prod => prod.id === item.productId);
         return `${p?.name || 'Producto'} ×${item.quantity}`;
       }).join(', ');
-      return {
-        'Fecha':               format(new Date(s.createdAt), 'dd/MM/yyyy'),
-        'Cliente':             s.customerName || '',
-        'Ciudad':              s.city || '',
-        'Productos':           productos,
-        'Repartidor':          deliveryName,
-        'Estado':              getSaleStatusLabel(s.status as SaleStatus, s.failureReason),
-        'Total Cobrado':       s.totalVenta,
-        'Comisión Repartidor': s.totalComision,
-      };
+      return [
+        format(new Date(s.createdAt), 'dd/MM/yyyy'),
+        s.customerName || '',
+        s.city || '',
+        productos,
+        sellerName,
+        deliveryName,
+        getSaleStatusLabel(s.status as SaleStatus, s.failureReason),
+        s.totalVenta,
+        s.totalComision,
+      ];
     });
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Ventas');
-    XLSX.writeFile(wb, `reporte-ventas-${PERIOD_SLUG[period]}-${format(new Date(), 'dd-MM-yyyy')}.xlsx`);
+
+    ws.addTable({
+      name: 'TablaVentas',
+      ref: 'A1',
+      headerRow: true,
+      style: { theme: 'TableStyleMedium2', showRowStripes: true },
+      columns: [
+        { name: 'Fecha',               filterButton: true },
+        { name: 'Cliente',             filterButton: true },
+        { name: 'Ciudad',              filterButton: true },
+        { name: 'Productos',           filterButton: true },
+        { name: 'Vendedor',            filterButton: true },
+        { name: 'Repartidor',          filterButton: true },
+        { name: 'Estado',              filterButton: true },
+        { name: 'Total Cobrado',       filterButton: true },
+        { name: 'Comisión Repartidor', filterButton: true },
+      ],
+      rows: tableRows,
+    });
+
+    ws.columns = [
+      { width: 12 }, { width: 24 }, { width: 16 }, { width: 36 },
+      { width: 20 }, { width: 20 }, { width: 16 }, { width: 14 }, { width: 20 },
+    ];
+
+    const sellerSlug = (currentUser?.name ?? 'seller')
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/\s+/g, '-').toLowerCase();
+    const filename = `reporte-ventas-${sellerSlug}-${PERIOD_SLUG[period]}-${format(new Date(), 'dd-MM-yyyy')}.xlsx`;
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   return (

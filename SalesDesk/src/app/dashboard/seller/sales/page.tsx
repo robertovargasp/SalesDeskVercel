@@ -1317,6 +1317,10 @@ export default function SellerSalesPage() {
                   <span className="text-xs font-medium">{deliveryPersons.find(d => d.id === sale.deliveryPersonId)?.name || '—'}</span>
                 </div>
               )}
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <User className="w-3.5 h-3.5 text-primary/60" />
+                <span className="text-xs font-medium">{users.find(u => u.id === sale.sellerId)?.name ?? '—'}</span>
+              </div>
               <div className="flex items-center justify-between border-t pt-4">
                 <div className="space-y-0.5">
                   <p className="text-[9px] font-black text-muted-foreground uppercase">Total Venta</p>
