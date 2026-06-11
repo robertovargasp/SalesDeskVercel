@@ -53,6 +53,7 @@ export default function UsersPage() {
   const [filterCity, setFilterCity] = useState('');
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [formData, setFormData] = useState(defaultForm);
+  const [touched, setTouched] = useState<Set<string>>(new Set());
 
   const sellers = users.filter(u => u.role === 'seller' && (filterCity === '' || u.city.toLowerCase().includes(filterCity.toLowerCase())));
   const deliveryUsers = users.filter(u => u.role === 'delivery' && (filterCity === '' || u.city.toLowerCase().includes(filterCity.toLowerCase())));
@@ -68,7 +69,51 @@ export default function UsersPage() {
   const passwordStrong = passwordChecks.every(c => c.ok);
   const passwordsMatch = formData.password === formData.confirmPassword;
 
+  const touch = (field: string) =>
+    setTouched(prev => { const s = new Set(prev); s.add(field); return s; });
+
+  const touchAll = () =>
+    setTouched(new Set(['name', 'username', 'city', 'email', 'phone', 'whatsapp', 'password', 'confirmPassword']));
+
+  const formErrors = useMemo(() => {
+    const errs: Record<string, string> = {};
+
+    if (!formData.name.trim()) errs.name = 'Nombre requerido';
+
+    if (!formData.username.trim()) errs.username = 'Usuario requerido';
+    else if (/[^a-zA-Z0-9_]/.test(formData.username)) errs.username = 'Solo letras, números y guión bajo. Sin espacios.';
+
+    if (!formData.city.trim()) errs.city = 'Ciudad requerida';
+    else if (formData.city.trim().length < 3) errs.city = 'Mínimo 3 caracteres';
+
+
+    if (formData.phone && (!/^\d+$/.test(formData.phone) || formData.phone.length < 10))
+      errs.phone = 'Solo números, mínimo 10 dígitos';
+
+    if (formData.whatsapp && (!/^\d+$/.test(formData.whatsapp) || formData.whatsapp.length < 10))
+      errs.whatsapp = 'Solo números, mínimo 10 dígitos';
+
+    if (!editingUser) {
+      if (!formData.password) errs.password = 'Contraseña requerida';
+      else if (!passwordStrong) errs.password = 'La contraseña no cumple los requisitos';
+      if (!formData.confirmPassword) errs.confirmPassword = 'Confirma la contraseña';
+      else if (!passwordsMatch) errs.confirmPassword = 'Las contraseñas no coinciden';
+    } else if (formData.password && !passwordStrong) {
+      errs.password = 'La contraseña no cumple los requisitos';
+    }
+
+    return errs;
+  }, [formData, editingUser, passwordStrong, passwordsMatch]);
+
+  const isFormValid = Object.keys(formErrors).length === 0;
+
+  const showErr = (field: string) =>
+    touched.has(field) && formErrors[field]
+      ? <p className="text-[11px] text-red-500 font-medium mt-1">{formErrors[field]}</p>
+      : null;
+
   const handleOpenDialog = (u: UserProfile | null = null) => {
+    setTouched(new Set());
     if (u) {
       setEditingUser(u);
       setFormData({
@@ -93,10 +138,14 @@ export default function UsersPage() {
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.city) return;
+    touchAll();
+    if (!isFormValid) return;
 
-    if (!editingUser && (!passwordStrong || !passwordsMatch)) return;
-
+    const dupUsername = users.find(u => u.username === formData.username && u.id !== editingUser?.id);
+    if (dupUsername) {
+      toast({ variant: 'destructive', title: 'Usuario no disponible', description: 'El nombre de usuario ya está en uso.' });
+      return;
+    }
     const userData = {
       name: formData.name,
       username: formData.username,
@@ -111,7 +160,7 @@ export default function UsersPage() {
     };
 
     if (editingUser) {
-      updateUser({ ...editingUser, ...userData });
+      updateUser({ ...editingUser, ...userData }, formData.password || undefined);
     } else {
       addUser(userData);
     }
@@ -235,64 +284,78 @@ export default function UsersPage() {
 
                 <div className="space-y-2">
                   <Label>Nombre Completo</Label>
-                  <Input value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="Juan Perez" required />
+                  <Input
+                    value={formData.name}
+                    onChange={e => setFormData({...formData, name: e.target.value})}
+                    onBlur={() => touch('name')}
+                    placeholder="Juan Perez"
+                    className={touched.has('name') && formErrors.name ? 'border-red-500' : ''}
+                  />
+                  {showErr('name')}
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Usuario</Label>
-                    <Input value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} placeholder="juanp" required />
+                    <Input
+                      value={formData.username}
+                      onChange={e => setFormData({...formData, username: e.target.value})}
+                      onBlur={() => touch('username')}
+                      placeholder="juan_perez"
+                      className={touched.has('username') && formErrors.username ? 'border-red-500' : ''}
+                    />
+                    {showErr('username')}
                   </div>
                   <div className="space-y-2">
                     <Label>Ciudad</Label>
-                    <Input value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} placeholder="Ej: CDMX" required />
+                    <Input
+                      value={formData.city}
+                      onChange={e => setFormData({...formData, city: e.target.value})}
+                      onBlur={() => touch('city')}
+                      placeholder="Ej: CDMX"
+                      className={touched.has('city') && formErrors.city ? 'border-red-500' : ''}
+                    />
+                    {showErr('city')}
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label className="flex items-center gap-2"><Phone className="w-4 h-4" /> Teléfono</Label>
-                    <Input value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} placeholder="664..." />
+                    <Input
+                      value={formData.phone}
+                      onChange={e => setFormData({...formData, phone: e.target.value})}
+                      onBlur={() => touch('phone')}
+                      placeholder="6641234567"
+                      className={touched.has('phone') && formErrors.phone ? 'border-red-500' : ''}
+                    />
+                    {showErr('phone')}
                   </div>
                   <div className="space-y-2">
                     <Label className="flex items-center gap-2"><Mail className="w-4 h-4" /> Email</Label>
-                    <Input value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} placeholder="correo@..." />
+                    <Input
+                      value={formData.email}
+                      onChange={e => setFormData({...formData, email: e.target.value})}
+                      onBlur={() => touch('email')}
+                      placeholder="correo@ejemplo.com"
+                      className={touched.has('email') && formErrors.email ? 'border-red-500' : ''}
+                    />
+                    {showErr('email')}
                   </div>
                 </div>
 
                 <div className="space-y-2">
                   <Label className="flex items-center gap-2"><Truck className="w-4 h-4 text-green-600" /> WhatsApp (para notificaciones)</Label>
-                  <Input value={formData.whatsapp} onChange={e => setFormData({...formData, whatsapp: e.target.value})} placeholder="+52 664..." />
+                  <Input
+                    value={formData.whatsapp}
+                    onChange={e => setFormData({...formData, whatsapp: e.target.value})}
+                    onBlur={() => touch('whatsapp')}
+                    placeholder="5216641234567"
+                    className={touched.has('whatsapp') && formErrors.whatsapp ? 'border-red-500' : ''}
+                  />
+                  {showErr('whatsapp')}
                 </div>
 
-                {formData.role === 'seller' && (
-                  <div className="bg-primary/5 p-4 rounded-xl border space-y-4">
-                    <h3 className="text-xs font-bold uppercase flex items-center gap-2 text-primary">
-                      <Clock className="w-3.5 h-3.5" /> Configuración de Pagos
-                    </h3>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label>Frecuencia</Label>
-                        <Select value={formData.settlementFrequency} onValueChange={(val: SettlementFrequency) => setFormData({...formData, settlementFrequency: val})}>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="weekly">Semanal</SelectItem>
-                            <SelectItem value="biweekly">Quincenal</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Día de Corte</Label>
-                        <Select value={formData.settlementStartDay} onValueChange={(val) => setFormData({...formData, settlementStartDay: val})}>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {DAYS.map(day => <SelectItem key={day.value} value={day.value}>{day.label}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                  </div>
-                )}
 
                 <div className="space-y-2">
                   <Label className="flex items-center gap-2">
@@ -303,11 +366,11 @@ export default function UsersPage() {
                     type="password"
                     value={formData.password}
                     onChange={e => setFormData({...formData, password: e.target.value})}
-                    required={!editingUser}
+                    onBlur={() => touch('password')}
                     placeholder={editingUser ? 'Dejar vacío para no cambiar' : 'Mínimo 8 caracteres'}
+                    className={touched.has('password') && formErrors.password ? 'border-red-500' : ''}
                   />
-                  {/* Indicador visual de fortaleza — solo al crear usuario */}
-                  {!editingUser && formData.password.length > 0 && (
+                  {(!editingUser || formData.password.length > 0) && formData.password.length > 0 && (
                     <div className="pt-1 space-y-1">
                       {passwordChecks.map(check => (
                         <div key={check.label} className="flex items-center gap-2">
@@ -322,9 +385,9 @@ export default function UsersPage() {
                       ))}
                     </div>
                   )}
+                  {formData.password.length === 0 && showErr('password')}
                 </div>
 
-                {/* Campo confirmar contraseña — solo al crear */}
                 {!editingUser && (
                   <div className="space-y-2">
                     <Label className="flex items-center gap-2">
@@ -334,8 +397,9 @@ export default function UsersPage() {
                       type="password"
                       value={formData.confirmPassword}
                       onChange={e => setFormData({...formData, confirmPassword: e.target.value})}
-                      required
+                      onBlur={() => touch('confirmPassword')}
                       placeholder="Repetir contraseña"
+                      className={touched.has('confirmPassword') && formErrors.confirmPassword ? 'border-red-500' : ''}
                     />
                     {formData.confirmPassword.length > 0 && !passwordsMatch && (
                       <p className="text-[11px] text-red-500 font-medium">Las contraseñas no coinciden</p>
@@ -345,13 +409,14 @@ export default function UsersPage() {
                         <CheckCircle2 className="w-3 h-3" /> Las contraseñas coinciden
                       </p>
                     )}
+                    {formData.confirmPassword.length === 0 && showErr('confirmPassword')}
                   </div>
                 )}
 
                 <Button
                   type="submit"
                   className="w-full h-12"
-                  disabled={!editingUser && (!passwordStrong || !passwordsMatch)}
+                  disabled={!isFormValid}
                 >
                   {editingUser ? 'Guardar Cambios' : 'Crear Cuenta'}
                 </Button>

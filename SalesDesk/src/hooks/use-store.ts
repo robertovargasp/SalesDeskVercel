@@ -92,21 +92,15 @@ export function useStore() {
         setUsers(data?.map(mapUser) ?? [])
       );
 
-    const fetchInventory = () => {
-      const q = supabase.from('inventory_items').select('*');
-      const filtered = role === 'seller' ? q.eq('seller_id', uid) : q;
-      return filtered.then(({ data }) =>
+    const fetchInventory = () =>
+      supabase.from('inventory_items').select('*').then(({ data }) =>
         setInventory(data?.map(mapInventoryItem) ?? [])
       );
-    };
 
-    const fetchAssignments = () => {
-      const q = supabase.from('inventory_assignments').select('*').order('created_at', { ascending: false });
-      const filtered = role === 'seller' ? q.eq('seller_id', uid) : q;
-      return filtered.then(({ data }) =>
+    const fetchAssignments = () =>
+      supabase.from('inventory_assignments').select('*').order('created_at', { ascending: false }).then(({ data }) =>
         setAssignments(data?.map(mapAssignment) ?? [])
       );
-    };
 
     const fetchSales = () => {
       const q = supabase.from('orders').select(`
@@ -125,23 +119,36 @@ export function useStore() {
 
     const fetchSettlements = async () => {
       if (role === 'delivery') {
+        // Settlements creados directamente por el repartidor (reported/confirmed)
+        const { data: direct } = await supabase
+          .from('settlements')
+          .select('*')
+          .eq('seller_id', uid)
+          .order('created_at', { ascending: false });
+
+        // Settlements vinculados via orders (confirmados por admin)
         const { data: linked } = await supabase
           .from('orders')
           .select('settlement_id')
           .eq('delivery_person_id', uid)
           .not('settlement_id', 'is', null);
 
-        const ids = [...new Set((linked ?? []).map(r => r.settlement_id as string))];
+        const linkedIds = [...new Set((linked ?? []).map(r => r.settlement_id as string))];
+        let linkedSettlements: any[] = [];
+        if (linkedIds.length > 0) {
+          const { data } = await supabase
+            .from('settlements')
+            .select('*')
+            .in('id', linkedIds)
+            .order('created_at', { ascending: false });
+          linkedSettlements = data ?? [];
+        }
 
-        if (ids.length === 0) { setSettlements([]); return; }
-
-        const { data } = await supabase
-          .from('settlements')
-          .select('*')
-          .in('id', ids)
-          .order('created_at', { ascending: false });
-
-        setSettlements(data?.map(mapSettlement) ?? []);
+        // Merge sin duplicados
+        const all = [...(direct ?? []), ...linkedSettlements];
+        const unique = Array.from(new Map(all.map(s => [s.id, s])).values());
+        unique.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        setSettlements(unique.map(mapSettlement));
         return;
       }
 
@@ -152,9 +159,8 @@ export function useStore() {
     };
 
     const fetchKardex = () => {
-      if (role === 'delivery') return;
       const q = supabase.from('kardex_entries').select('*').order('created_at', { ascending: false });
-      const filtered = role === 'seller' ? q.eq('seller_id', uid).range(0, 99) : q.range(0, 99);
+      const filtered = role === 'delivery' ? q.eq('delivery_person_id', uid).range(0, 99) : q.range(0, 99);
       return filtered.then(({ data }) => {
         setKardex(data?.map(mapKardex) ?? []);
         setKardexPage(0);
@@ -228,21 +234,21 @@ export function useStore() {
 
   const logKardex = (
     productId: string,
-    sellerId: string,
+    deliveryPersonId: string,
     type: MovementType,
     reason: MovementReason,
     qty: number,
     note?: string,
     orderId?: string
   ) => {
-    const invItem = inventory.find(i => i.productId === productId && i.sellerId === sellerId);
+    const invItem = inventory.find(i => i.productId === productId && i.deliveryPersonId === deliveryPersonId);
     const before = invItem?.quantity ?? 0;
     const after = type === 'addition' ? before + qty : Math.max(0, before - qty);
 
     const entry: Record<string, unknown> = {
       id: newId(),
       product_id: productId,
-      seller_id: sellerId,
+      delivery_person_id: deliveryPersonId,
       type,
       reason,
       quantity: qty,
@@ -255,7 +261,6 @@ export function useStore() {
     if (orderId) entry.order_id = orderId;
     if (note) entry.notes = note;
 
-    // Fire-and-forget con log de error — kardex es auditoría, no bloquea el flujo
     supabase.from('kardex_entries').insert(entry).then(({ error }) => {
       if (error) console.error('[logKardex] ERROR:', error.message, '| entry:', entry);
     });
@@ -274,29 +279,29 @@ export function useStore() {
     manualTotalVenta?: number,
     manualTotalComision?: number,
     googleMapsLink?: string,
-    photoUrl?: string
+    photoUrl?: string,
+    deliveryPersonId?: string
   ) => {
-    if (sellerId !== user?.id) {
+    if (currentUser?.role !== 'admin' && sellerId !== user?.id) {
       toast({ variant: 'destructive', title: 'No autorizado', description: 'No puedes registrar ventas para otro usuario.' });
       return;
     }
-    // Validación bloqueante: recolectar todos los errores de stock antes de insertar
-    const stockErrors: string[] = [];
-    for (const item of items) {
-      const invItem = inventory.find(i => i.productId === item.productId && i.sellerId === sellerId);
-      const available = invItem?.quantity ?? 0;
-      if (available < item.quantity) {
-        const prod = products.find(p => p.id === item.productId);
-        stockErrors.push(`${prod?.name || 'Producto'}: disponible ${available}, solicitado ${item.quantity}`);
+
+    // Validate delivery person stock before creating the sale
+    if (deliveryPersonId) {
+      const stockErrs: string[] = [];
+      for (const item of items) {
+        const invItem = inventory.find(i => i.productId === item.productId && i.deliveryPersonId === deliveryPersonId);
+        const available = (invItem?.quantity ?? 0) - (invItem?.reservedQuantity ?? 0);
+        if (available < item.quantity) {
+          const prod = products.find(p => p.id === item.productId);
+          stockErrs.push(`${prod?.name ?? item.productId}: disponible ${available}, solicitado ${item.quantity}`);
+        }
       }
-    }
-    if (stockErrors.length > 0) {
-      toast({
-        variant: 'destructive',
-        title: 'Stock insuficiente',
-        description: stockErrors.join(' · '),
-      });
-      return;
+      if (stockErrs.length > 0) {
+        toast({ variant: 'destructive', title: 'Stock insuficiente del repartidor', description: stockErrs.join(' · ') });
+        return;
+      }
     }
 
     const saleId = newId();
@@ -313,6 +318,7 @@ export function useStore() {
     const { error: orderErr } = await supabase.from('orders').insert({
       id: saleId,
       seller_id: sellerId,
+      delivery_person_id: deliveryPersonId ?? null,
       city,
       status: 'assigned',
       total_venta:     totalVenta,
@@ -360,31 +366,33 @@ export function useStore() {
       note:      'Venta registrada',
     });
 
-    // 4. Descontar stock en inventory_items + kardex
-    for (const item of items) {
-      const invItem = inventory.find(i => i.productId === item.productId && i.sellerId === sellerId);
-      if (invItem) {
-        const newQty = invItem.quantity - item.quantity;
-        const { error: invErr } = await supabase
-          .from('inventory_items')
-          .update({ quantity: newQty })
-          .eq('id', invItem.id);
-
-        if (!invErr) {
-          logKardex(item.productId, sellerId, 'subtraction', 'sale', item.quantity, `Venta #${saleId.slice(0,8)}`, saleId);
+    // 4. Reservar stock del repartidor
+    if (deliveryPersonId) {
+      for (const item of items) {
+        const invItem = inventory.find(i => i.productId === item.productId && i.deliveryPersonId === deliveryPersonId);
+        if (!invItem) {
+          console.warn('[registerMultiSale] invItem not found for product:', item.productId, 'dp:', deliveryPersonId);
+          continue;
         }
-
+        const { error: resErr } = await supabase
+          .from('inventory_items')
+          .update({ reserved_quantity: invItem.reservedQuantity + item.quantity })
+          .eq('product_id', item.productId)
+          .eq('delivery_person_id', deliveryPersonId);
+        if (resErr) {
+          console.error('[registerMultiSale] reserve failed:', resErr.message);
+        }
+        const available = invItem.quantity - invItem.reservedQuantity - item.quantity;
         const prod = products.find(p => p.id === item.productId);
-        const minStock = prod?.minStock ?? MIN_STOCK_DEFAULT;
-        if (newQty <= minStock) {
-          toast({ title: '⚠️ Stock bajo', description: `${prod?.name}: quedan ${newQty} unidades` });
+        if (available <= (prod?.minStock ?? MIN_STOCK_DEFAULT)) {
+          toast({ title: '⚠️ Stock bajo', description: `${prod?.name}: disponible ${Math.max(0, available)} unidades` });
         }
       }
+      await refetchInventory();
     }
 
-    toast({ title: 'Venta registrada', description: 'La venta fue enviada al vendedor.' });
+    toast({ title: 'Venta registrada', description: 'La venta fue creada exitosamente.' });
     await refetchSales();
-    await refetchInventory();
   };
 
   // ─── Refetch de ventas (reutilizable desde mutations) ──────────────────────
@@ -407,8 +415,8 @@ export function useStore() {
 
   const VALID_TRANSITIONS: Record<SaleStatus, SaleStatus[]> = {
     assigned:           ['accepted', 'cancelled'],
-    accepted:           ['contacting', 'cancelled'],
-    contacting:         ['scheduled', 'cancelled'],
+    accepted:           ['contacting', 'scheduled', 'in_transit', 'cancelled'],
+    contacting:         ['scheduled', 'in_transit', 'cancelled'],
     scheduled:          ['in_transit', 'cancelled'],
     in_transit:         ['delivered', 'delivery_failed', 'pending_return'],
     delivered:          ['delivery_confirmed', 'paid'],
@@ -456,16 +464,34 @@ export function useStore() {
       note: data?.note ?? `Estado actualizado a: ${status}`,
     });
 
-    // Stock se devuelve SOLO al cancelar directamente — no al marcar como fallido
-    // pending_return espera la decisión explícita del admin/vendedor
+    // Al marcar como fallido: liberar reserva
+    if (status === 'delivery_failed') {
+      if (sale.deliveryPersonId) {
+        for (const item of sale.items) {
+          const invItem = inventory.find(i => i.productId === item.productId && i.deliveryPersonId === sale.deliveryPersonId);
+          if (invItem) {
+            await supabase.from('inventory_items')
+              .update({ reserved_quantity: Math.max(0, invItem.reservedQuantity - item.quantity) })
+              .eq('id', invItem.id);
+          }
+        }
+        await refetchInventory();
+      }
+    }
+
+    // Al cancelar: liberar reserva (no devolver stock físico, aún no fue descontado)
     if (status === 'cancelled') {
       if (sale.status === 'cancelled') return;
-      for (const item of sale.items) {
-        const invItem = inventory.find(i => i.productId === item.productId && i.sellerId === sale.sellerId);
-        if (invItem) {
-          await supabase.from('inventory_items').update({ quantity: invItem.quantity + item.quantity }).eq('id', invItem.id);
-          logKardex(item.productId, sale.sellerId, 'addition', 'return', item.quantity, `Cancelación directa #${saleId.slice(0,8)}`, saleId);
+      if (sale.deliveryPersonId) {
+        for (const item of sale.items) {
+          const invItem = inventory.find(i => i.productId === item.productId && i.deliveryPersonId === sale.deliveryPersonId);
+          if (invItem) {
+            await supabase.from('inventory_items')
+              .update({ reserved_quantity: Math.max(0, invItem.reservedQuantity - item.quantity) })
+              .eq('id', invItem.id);
+          }
         }
+        await refetchInventory();
       }
     }
 
@@ -473,6 +499,9 @@ export function useStore() {
   };
 
   const confirmDelivery = async (saleId: string, note?: string) => {
+    const sale = sales.find(s => s.id === saleId);
+    if (!sale) return;
+
     const updateData: Record<string, unknown> = { status: 'delivered' };
     if (note?.trim()) updateData.notes = note.trim();
 
@@ -485,34 +514,91 @@ export function useStore() {
       note: note?.trim() ? `Entrega confirmada — ${note.trim()}` : 'Entrega confirmada',
     });
 
+    // Descontar stock físico y liberar reserva
+    if (sale.deliveryPersonId) {
+      for (const item of sale.items) {
+        const invItem = inventory.find(i => i.productId === item.productId && i.deliveryPersonId === sale.deliveryPersonId);
+        if (invItem) {
+          await supabase.from('inventory_items').update({
+            quantity: Math.max(0, invItem.quantity - item.quantity),
+            reserved_quantity: Math.max(0, invItem.reservedQuantity - item.quantity),
+          }).eq('id', invItem.id);
+          logKardex(item.productId, sale.deliveryPersonId, 'subtraction', 'sale', item.quantity, `Entrega confirmada #${saleId.slice(0, 8)}`, saleId);
+        }
+      }
+      await refetchInventory();
+    }
+
     await refetchSales();
   };
 
   const assignDeliveryPerson = async (saleId: string, deliveryPersonId: string) => {
+    const sale = sales.find(s => s.id === saleId);
+    if (!sale) return;
     const deliveryPerson = users.find(u => u.id === deliveryPersonId);
+
+    // Liberar reserva del repartidor anterior
+    if (sale.deliveryPersonId && sale.deliveryPersonId !== deliveryPersonId) {
+      for (const item of sale.items) {
+        const invItem = inventory.find(i => i.productId === item.productId && i.deliveryPersonId === sale.deliveryPersonId);
+        if (invItem) {
+          await supabase.from('inventory_items')
+            .update({ reserved_quantity: Math.max(0, invItem.reservedQuantity - item.quantity) })
+            .eq('id', invItem.id);
+        }
+      }
+    }
+
+    // Validar disponible y reservar stock del nuevo repartidor
+    if (!sale.deliveryPersonId || sale.deliveryPersonId !== deliveryPersonId) {
+      const stockErrors: string[] = [];
+      for (const item of sale.items) {
+        const invItem = inventory.find(i => i.productId === item.productId && i.deliveryPersonId === deliveryPersonId);
+        const available = (invItem?.quantity ?? 0) - (invItem?.reservedQuantity ?? 0);
+        if (available < item.quantity) {
+          const prod = products.find(p => p.id === item.productId);
+          stockErrors.push(`${prod?.name}: disponible ${available}, solicitado ${item.quantity}`);
+        }
+      }
+      if (stockErrors.length > 0) {
+        toast({ variant: 'destructive', title: 'Stock insuficiente del repartidor', description: stockErrors.join(' · ') });
+        return;
+      }
+      for (const item of sale.items) {
+        const invItem = inventory.find(i => i.productId === item.productId && i.deliveryPersonId === deliveryPersonId);
+        if (invItem) {
+          await supabase.from('inventory_items')
+            .update({ reserved_quantity: invItem.reservedQuantity + item.quantity })
+            .eq('id', invItem.id);
+          const available = invItem.quantity - invItem.reservedQuantity - item.quantity;
+          const prod = products.find(p => p.id === item.productId);
+          if (available <= (prod?.minStock ?? MIN_STOCK_DEFAULT)) {
+            toast({ title: '⚠️ Stock bajo', description: `${prod?.name}: disponible ${Math.max(0, available)} unidades` });
+          }
+        }
+      }
+    }
+
     const { error } = await supabase.from('orders').update({ delivery_person_id: deliveryPersonId }).eq('id', saleId);
     if (error) { toast({ variant: 'destructive', title: 'Error al asignar repartidor', description: error.message }); return; }
 
     supabase.from('order_events').insert({
-      order_id: saleId,
-      type: 'assignment',
-      user_id: user?.id ?? null,
-      user_name: currentUser?.name ?? 'Sistema',
+      order_id: saleId, type: 'assignment',
+      user_id: user?.id ?? null, user_name: currentUser?.name ?? 'Sistema',
       note: `Asignado a repartidor: ${deliveryPerson?.name || 'Repartidor'}`,
     });
 
     toast({ title: 'Repartidor asignado', description: `Pedido asignado a ${deliveryPerson?.name}` });
     await refetchSales();
+    await refetchInventory();
   };
 
   const reportDeliveryFailure = async (saleId: string, reason: string, step?: number) => {
     const sale = sales.find(s => s.id === saleId);
     if (!sale) return;
 
-    // El stock NO se devuelve aquí — el pedido queda en pending_return
-    // para que admin/vendedor decidan cancelar o reintentar en las próximas 48h
     const { error } = await supabase.from('orders').update({
-      status: 'pending_return',
+      status: 'delivery_failed',
       failure_reason: reason,
       failure_step: step ?? null,
       failed_at: new Date().toISOString(),
@@ -524,14 +610,23 @@ export function useStore() {
       type: 'failure',
       user_id: user?.id ?? null,
       user_name: currentUser?.name ?? 'Repartidor',
-      note: `Fallo en entrega: ${reason} — pendiente de resolución (48h)`,
+      note: `Fallo en entrega: ${reason}`,
     });
 
-    toast({
-      variant: 'destructive',
-      title: 'Fallo registrado',
-      description: 'El pedido queda en espera. Admin/vendedor deben cancelar o reintentar en 48h.'
-    });
+    // Liberar reserva
+    if (sale.deliveryPersonId) {
+      for (const item of sale.items) {
+        const invItem = inventory.find(i => i.productId === item.productId && i.deliveryPersonId === sale.deliveryPersonId);
+        if (invItem) {
+          await supabase.from('inventory_items')
+            .update({ reserved_quantity: Math.max(0, invItem.reservedQuantity - item.quantity) })
+            .eq('id', invItem.id);
+        }
+      }
+      await refetchInventory();
+    }
+
+    toast({ variant: 'destructive', title: 'Fallo registrado', description: reason });
     await refetchSales();
   };
 
@@ -541,21 +636,16 @@ export function useStore() {
     if (!sale) return;
     if (sale.status === 'cancelled') return;
 
-    // Devolver cada producto al inventario del vendedor
-    for (const item of sale.items) {
-      const invItem = inventory.find(i => i.productId === item.productId && i.sellerId === sale.sellerId);
-      if (invItem) {
-        await supabase.from('inventory_items').update({ quantity: invItem.quantity + item.quantity }).eq('id', invItem.id);
-      } else {
-        // Si por algún motivo no existe el registro, crearlo con la cantidad devuelta
-        await supabase.from('inventory_items').insert({
-          id: newId(), product_id: item.productId, seller_id: sale.sellerId, quantity: item.quantity
-        });
+    // Liberar reserva del repartidor
+    if (sale.deliveryPersonId) {
+      for (const item of sale.items) {
+        const invItem = inventory.find(i => i.productId === item.productId && i.deliveryPersonId === sale.deliveryPersonId);
+        if (invItem) {
+          await supabase.from('inventory_items')
+            .update({ reserved_quantity: Math.max(0, invItem.reservedQuantity - item.quantity) })
+            .eq('id', invItem.id);
+        }
       }
-      logKardex(
-        item.productId, sale.sellerId, 'addition', 'return', item.quantity,
-        `Cancelación pedido fallido #${saleId.slice(0,8)}`, saleId
-      );
     }
 
     const { error } = await supabase.from('orders').update({
@@ -569,13 +659,42 @@ export function useStore() {
       note: 'Pedido cancelado tras fallo — stock devuelto al inventario',
     });
 
-    toast({ title: 'Pedido cancelado', description: 'El stock fue devuelto al inventario del vendedor.' });
+    toast({ title: 'Pedido cancelado', description: 'La reserva fue liberada correctamente.' });
     await refetchSales();
     await refetchInventory();
   };
 
-  // ─── Reintentar entrega — reactiva el pedido sin tocar el stock ──────────
+  // ─── Reintentar entrega — re-reserva stock y reactiva el pedido ────────
   const retryDelivery = async (saleId: string) => {
+    const sale = sales.find(s => s.id === saleId);
+    if (!sale) return;
+
+    // Validar disponibilidad y re-reservar
+    if (sale.deliveryPersonId) {
+      const stockErrors: string[] = [];
+      for (const item of sale.items) {
+        const invItem = inventory.find(i => i.productId === item.productId && i.deliveryPersonId === sale.deliveryPersonId);
+        const available = (invItem?.quantity ?? 0) - (invItem?.reservedQuantity ?? 0);
+        if (available < item.quantity) {
+          const prod = products.find(p => p.id === item.productId);
+          stockErrors.push(`${prod?.name}: disponible ${available}, solicitado ${item.quantity}`);
+        }
+      }
+      if (stockErrors.length > 0) {
+        toast({ variant: 'destructive', title: 'Stock insuficiente para reintentar', description: stockErrors.join(' · ') });
+        return;
+      }
+      for (const item of sale.items) {
+        const invItem = inventory.find(i => i.productId === item.productId && i.deliveryPersonId === sale.deliveryPersonId);
+        if (invItem) {
+          await supabase.from('inventory_items')
+            .update({ reserved_quantity: invItem.reservedQuantity + item.quantity })
+            .eq('id', invItem.id);
+        }
+      }
+      await refetchInventory();
+    }
+
     const { error } = await supabase.from('orders').update({
       status: 'in_transit',
       failure_reason: null,
@@ -605,25 +724,38 @@ export function useStore() {
 
     // Devolver stock ANTES del DELETE para no perder los datos si algo falla.
     // 'cancelled' ya devolvió stock en updateSaleStatus/cancelFailedOrder — no volver a sumar.
-    const RETURN_STOCK_STATUSES = ['assigned', 'accepted', 'contacting', 'scheduled', 'in_transit', 'delivery_failed', 'pending_return'];
+    // Liberar reserva para pedidos que aún no fueron entregados
+    const RESERVE_RELEASE_STATUSES = ['assigned', 'accepted', 'contacting', 'scheduled', 'in_transit'];
     let stockReturned = false;
-    if (RETURN_STOCK_STATUSES.includes(sale.status)) {
+    if (RESERVE_RELEASE_STATUSES.includes(sale.status) && sale.deliveryPersonId) {
       for (const item of sale.items) {
-        const invItem = inventory.find(i => i.productId === item.productId && i.sellerId === sale.sellerId);
+        const invItem = inventory.find(i => i.productId === item.productId && i.deliveryPersonId === sale.deliveryPersonId);
         if (invItem) {
-          await supabase.from('inventory_items').update({ quantity: invItem.quantity + item.quantity }).eq('id', invItem.id);
-        } else {
-          await supabase.from('inventory_items').insert({
-            id: newId(), product_id: item.productId, seller_id: sale.sellerId, quantity: item.quantity,
-          });
+          await supabase.from('inventory_items')
+            .update({ reserved_quantity: Math.max(0, invItem.reservedQuantity - item.quantity) })
+            .eq('id', invItem.id);
         }
-        logKardex(item.productId, sale.sellerId, 'addition', 'return', item.quantity, `Eliminación pedido #${saleId.slice(0, 8)}`, saleId);
+      }
+      stockReturned = true;
+    }
+
+    // Pedido delivered: restaurar quantity física al inventario del repartidor
+    if (sale.status === 'delivered' && sale.deliveryPersonId) {
+      for (const item of sale.items) {
+        const invItem = inventory.find(i => i.productId === item.productId && i.deliveryPersonId === sale.deliveryPersonId);
+        if (invItem) {
+          await supabase.from('inventory_items')
+            .update({ quantity: invItem.quantity + item.quantity })
+            .eq('id', invItem.id);
+          logKardex(item.productId, sale.deliveryPersonId, 'addition', 'correction', item.quantity, `Eliminación de venta entregada #${saleId.slice(0, 8)}`, saleId);
+        }
       }
       stockReturned = true;
     }
 
     const { error, count } = await supabase.from('orders').delete({ count: 'exact' }).eq('id', saleId);
-    if (error || count === 0) {
+    console.log('[deleteSale]', { error: error?.message ?? null, count, status: sale.status, settlementId: sale.settlementId });
+    if (error || !count) {
       toast({ variant: 'destructive', title: 'Error al eliminar', description: error?.message ?? 'Sin permiso para eliminar esta venta.' });
       return;
     }
@@ -664,6 +796,7 @@ export function useStore() {
     }
     toast({ title: 'Depósito reportado', description: 'Enviado para validación.' });
     await refetchSales();
+    await refetchSettlements();
   };
 
   const confirmSettlement = async (settlementId: string) => {
@@ -716,6 +849,11 @@ export function useStore() {
     await refetchSettlements();
   };
 
+  const refetchUsers = async () => {
+    const { data } = await supabase.from('profiles').select('*');
+    if (data) setUsers(data.map(mapUser));
+  };
+
   const refetchSettlements = async () => {
     if (!user || !currentUser) return;
     const uid = user.id;
@@ -728,28 +866,22 @@ export function useStore() {
 
   // ─── Refetch de inventario (reutilizable desde mutations) ──────────────────
   const refetchInventory = async () => {
-    if (!user || !currentUser) return;
-    const q = supabase.from('inventory_items').select('*');
-    const filtered = currentUser.role === 'seller' ? q.eq('seller_id', user.id) : q;
-    const { data, error } = await filtered;
+    const { data } = await supabase.from('inventory_items').select('*');
     if (data) setInventory(data.map(mapInventoryItem));
   };
 
   const refetchAssignments = async () => {
-    if (!user || !currentUser) return;
-    const q = supabase.from('inventory_assignments').select('*').order('created_at', { ascending: false });
-    const filtered = currentUser.role === 'seller' ? q.eq('seller_id', user.id) : q;
-    const { data, error } = await filtered;
+    const { data } = await supabase.from('inventory_assignments').select('*').order('created_at', { ascending: false });
     if (data) setAssignments(data.map(mapAssignment));
   };
 
   // ─── Inventario ───────────────────────────────────────────────────────────
 
-  const assignInventory = async (productId: string, sellerId: string, quantity: number) => {
+  const assignInventory = async (productId: string, deliveryPersonId: string, quantity: number) => {
     if (currentUser?.role !== 'admin') { toast({ variant: 'destructive', title: 'No autorizado' }); return; }
     const id = newId();
     const payload = {
-      id, product_id: productId, seller_id: sellerId, quantity,
+      id, product_id: productId, delivery_person_id: deliveryPersonId, quantity,
       type: 'addition', reason: 'load', status: 'pending',
       created_at: new Date().toISOString(),
     };
@@ -760,7 +892,6 @@ export function useStore() {
       return;
     }
 
-    logKardex(productId, sellerId, 'addition', 'load', quantity, 'Envío de mercancía pendiente de confirmación');
     await refetchAssignments();
   };
 
@@ -776,7 +907,7 @@ export function useStore() {
     if (aErr) { toast({ variant: 'destructive', title: 'Error', description: aErr.message }); return; }
 
     if (status === 'confirmed') {
-      const invItem = inventory.find(i => i.productId === assignment.productId && i.sellerId === assignment.sellerId);
+      const invItem = inventory.find(i => i.productId === assignment.productId && i.deliveryPersonId === assignment.deliveryPersonId);
 
       if (invItem) {
         const { error } = await supabase.from('inventory_items')
@@ -787,12 +918,14 @@ export function useStore() {
         const { error } = await supabase.from('inventory_items').insert({
           id: newInvId,
           product_id: assignment.productId,
-          seller_id: assignment.sellerId,
+          delivery_person_id: assignment.deliveryPersonId,
           quantity: finalQty,
+          reserved_quantity: 0,
         });
         if (error) { toast({ variant: 'destructive', title: 'Error', description: error.message }); return; }
       }
 
+      logKardex(assignment.productId, assignment.deliveryPersonId, 'addition', 'load', finalQty, 'Recepción de mercancía confirmada');
       toast({ title: 'Stock actualizado', description: 'La mercancía se sumó al inventario.' });
       await refetchInventory();
     }
@@ -801,28 +934,28 @@ export function useStore() {
   };
 
   const adjustInventory = async (
-    productId: string, sellerId: string, quantity: number,
+    productId: string, deliveryPersonId: string, quantity: number,
     type: MovementType, reason: MovementReason, notes?: string
   ) => {
     const id = newId();
     const { error: aErr } = await supabase.from('inventory_assignments').insert({
-      id, product_id: productId, seller_id: sellerId,
+      id, product_id: productId, delivery_person_id: deliveryPersonId,
       quantity, type, reason, status: 'confirmed',
       created_at: new Date().toISOString(), notes: notes ?? '',
     });
     if (aErr) { toast({ variant: 'destructive', title: 'Error', description: aErr.message }); return; }
 
-    const invItem = inventory.find(i => i.productId === productId && i.sellerId === sellerId);
+    const invItem = inventory.find(i => i.productId === productId && i.deliveryPersonId === deliveryPersonId);
     if (invItem) {
       const newQty = type === 'addition' ? invItem.quantity + quantity : Math.max(0, invItem.quantity - quantity);
       await supabase.from('inventory_items').update({ quantity: newQty }).eq('id', invItem.id);
     } else if (type === 'addition') {
       await supabase.from('inventory_items').insert({
-        id: newId(), product_id: productId, seller_id: sellerId, quantity
+        id: newId(), product_id: productId, delivery_person_id: deliveryPersonId, quantity
       });
     }
 
-    logKardex(productId, sellerId, type, reason, quantity, notes);
+    logKardex(productId, deliveryPersonId, type, reason, quantity, notes);
     await refetchInventory();
     await refetchAssignments();
   };
@@ -883,14 +1016,14 @@ export function useStore() {
 
   const addUser = async (u: NewUserPayload) => {
     const { password, ...userData } = u;
-    const email = userData.username.includes('@') ? userData.username : `${userData.username}@salesdesk.com`;
+    const authEmail = `${userData.username}@salesdesk.com`;
 
     try {
       // Crear usuario en Supabase Auth via API route (usa service_role server-side)
       const res = await fetch('/api/users/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: authEmail, password }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
@@ -900,7 +1033,7 @@ export function useStore() {
         id: uid,
         name: userData.name,
         username: userData.username,
-        email,
+        email: userData.email ?? null,
         phone: userData.phone ?? null,
         whatsapp: userData.whatsapp ?? null,
         city: userData.city ?? '',
@@ -911,12 +1044,13 @@ export function useStore() {
       });
 
       toast({ title: `${userData.role === 'delivery' ? 'Repartidor' : 'Vendedor'} creado` });
+      await refetchUsers();
     } catch (error: any) {
       toast({ variant: 'destructive', title: 'Error', description: error.message });
     }
   };
 
-  const updateUser = async (u: UserProfile) => {
+  const updateUser = async (u: UserProfile, password?: string) => {
     if (currentUser?.role !== 'admin' && u.id !== currentUser?.id) {
       toast({ variant: 'destructive', title: 'No autorizado' }); return;
     }
@@ -929,6 +1063,17 @@ export function useStore() {
         settlement_start_day: u.settlementStartDay,
       }).eq('id', u.id);
       if (error) throw error;
+
+      if (password) {
+        const res = await fetch('/api/users/update-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: u.id, password }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error);
+      }
+      await refetchUsers();
     } catch (error: any) {
       toast({ variant: 'destructive', title: 'Error al actualizar usuario', description: error.message });
     }
@@ -938,8 +1083,14 @@ export function useStore() {
     if (currentUser?.role !== 'admin') { toast({ variant: 'destructive', title: 'No autorizado' }); return; }
     if (id === currentUser?.id) { toast({ variant: 'destructive', title: 'No puedes eliminar tu propia cuenta' }); return; }
     try {
-      const { error } = await supabase.from('profiles').delete().eq('id', id);
-      if (error) throw error;
+      const res = await fetch('/api/users/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: id }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error);
+      await refetchUsers();
     } catch (error: any) {
       toast({ variant: 'destructive', title: 'Error al eliminar usuario', description: error.message });
     }
@@ -948,12 +1099,12 @@ export function useStore() {
   // ─── Configuración ────────────────────────────────────────────────────────
 
   const loadMoreKardex = async () => {
-    if (!user || !currentUser || currentUser.role === 'delivery') return;
+    if (!user || !currentUser) return;
     const nextPage = kardexPage + 1;
     const start = nextPage * 100;
     const q = supabase.from('kardex_entries').select('*').order('created_at', { ascending: false });
-    const filtered = currentUser.role === 'seller'
-      ? q.eq('seller_id', user.id).range(start, start + 99)
+    const filtered = currentUser.role === 'delivery'
+      ? q.eq('delivery_person_id', user.id).range(start, start + 99)
       : q.range(start, start + 99);
     const { data } = await filtered;
     setKardex(prev => [...prev, ...(data?.map(mapKardex) ?? [])]);

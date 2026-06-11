@@ -138,6 +138,10 @@ export default function DeliveryPage() {
 
   const handleSubmitSettlement = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (selectedOrderIds.size === 0) {
+      toast({ variant: 'destructive', title: 'Sin pedidos seleccionados', description: 'Selecciona al menos un pedido para incluir en el reporte.' });
+      return;
+    }
     const amount = parseFloat(settlementAmount);
     if (isNaN(amount) || amount <= 0) {
       toast({ variant: 'destructive', title: 'Monto inválido', description: 'Ingresa una cantidad mayor a 0.' });
@@ -182,7 +186,11 @@ export default function DeliveryPage() {
   };
 
   const handleConfirmDelivery = async () => {
-    if (!selectedSale || !deliveryOutcome) return;
+    if (!selectedSale) return;
+    if (!deliveryOutcome) {
+      toast({ variant: 'destructive', title: 'Selecciona el resultado', description: 'Indica si el pedido fue entregado, rechazado o no aceptado.' });
+      return;
+    }
 
     if (deliveryOutcome === 'entregado') {
       await confirmDelivery(selectedSale.id, deliveryComment || undefined);

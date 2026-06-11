@@ -91,6 +91,7 @@ export default function SalesPage() {
 
   const [header, setHeader] = useState({
     sellerId: '',
+    deliveryPersonId: '',
     city: '',
     customerName: '',
     customerPhone: '',
@@ -109,12 +110,12 @@ export default function SalesPage() {
   useEffect(() => {
     if (isSeller && currentUser?.id && products.length > 0) {
       setHeader(h => ({ ...h, sellerId: currentUser.id, city: currentUser.city || '' }));
-      initializeBatchItems(currentUser.id);
+      resetBatchItems();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSeller, currentUser?.id, products.length]);
 
-  const initializeBatchItems = (sellerId: string) => {
+  const resetBatchItems = () => {
     const initial: Record<string, any> = {};
     products.forEach(p => {
       initial[p.id] = {
@@ -131,8 +132,14 @@ export default function SalesPage() {
 
   const handleSellerChange = (v: string) => {
     const seller = users.find(u => u.id === v);
-    setHeader({ ...header, sellerId: v, city: seller?.city || '' });
-    initializeBatchItems(v);
+    setHeader(h => ({ ...h, sellerId: v, city: seller?.city || '', deliveryPersonId: '' }));
+    resetBatchItems();
+  };
+
+  const handleDeliveryChange = (dpId: string) => {
+    const dp = users.find(u => u.id === dpId);
+    setHeader(h => ({ ...h, deliveryPersonId: dpId, city: dp?.city || h.city }));
+    resetBatchItems();
   };
 
   const handleBatchUpdate = (productId: string, field: 'quantity' | 'price' | 'commission', value: string) => {
@@ -152,17 +159,17 @@ export default function SalesPage() {
   };
 
   const stockErrors = useMemo(() => {
-    if (!header.sellerId) return {} as Record<string, { available: number; requested: number }>;
+    if (!header.deliveryPersonId) return {} as Record<string, { available: number; requested: number }>;
     const errors: Record<string, { available: number; requested: number }> = {};
     Object.entries(batchItems).forEach(([productId, data]) => {
       const qty = parseInt(data.quantity);
       if (qty > 0) {
-        const available = inventory.find(i => i.productId === productId && i.sellerId === header.sellerId)?.quantity ?? 0;
+        const available = inventory.find(i => i.productId === productId && i.deliveryPersonId === header.deliveryPersonId)?.quantity ?? 0;
         if (qty > available) errors[productId] = { available, requested: qty };
       }
     });
     return errors;
-  }, [batchItems, header.sellerId, inventory]);
+  }, [batchItems, header.deliveryPersonId, inventory]);
 
   const hasStockError = Object.keys(stockErrors).length > 0;
 
@@ -220,6 +227,21 @@ export default function SalesPage() {
       return;
     }
 
+    if (!header.deliveryPersonId) {
+      toast({ variant: 'destructive', title: 'Repartidor requerido', description: 'Selecciona el repartidor que entregará el pedido.' });
+      return;
+    }
+
+    if (!header.customerPhone.trim()) {
+      toast({ variant: 'destructive', title: 'El teléfono es requerido', description: 'Ingresa el número de contacto del cliente.' });
+      return;
+    }
+
+    if (!header.customerAddress.trim()) {
+      toast({ variant: 'destructive', title: 'La dirección es requerida', description: 'Ingresa la dirección de entrega del cliente.' });
+      return;
+    }
+
     if (totals.itemsToRegister.length === 0) {
       toast({ variant: "destructive", title: "Venta vacía", description: "Ingrese cantidades para al menos un producto." });
       return;
@@ -241,11 +263,12 @@ export default function SalesPage() {
       totals.totalVenta,
       totals.totalComision,
       header.googleMapsLink,
-      photoBase64
+      photoBase64,
+      header.deliveryPersonId
     );
 
     setIsOpen(false);
-    setHeader({ sellerId: '', city: '', customerName: '', customerPhone: '', additionalPhone: '', customerAddress: '', googleMapsLink: '', notes: '' });
+    setHeader({ sellerId: '', deliveryPersonId: '', city: '', customerName: '', customerPhone: '', additionalPhone: '', customerAddress: '', googleMapsLink: '', notes: '' });
     setBatchItems({});
     setManualTotalVenta('');
     setManualTotalComision('');
@@ -420,7 +443,7 @@ export default function SalesPage() {
               />
             </>
           )}
-        <Dialog open={isOpen} onOpenChange={(val) => { setIsOpen(val); if (val) initializeBatchItems(header.sellerId); }}>
+        <Dialog open={isOpen} onOpenChange={(val) => { setIsOpen(val); if (val) resetBatchItems(); }}>
           <DialogTrigger asChild>
             <Button className="gap-2 h-12 px-6 shadow-xl bg-primary hover:bg-primary/90 transition-all">
               <Plus className="w-5 h-5" /> Nueva Venta Directa
@@ -464,7 +487,21 @@ export default function SalesPage() {
                   <Label className="text-xs font-bold uppercase text-muted-foreground">Ciudad</Label>
                   <Input className="h-11 bg-white border-none shadow-sm" value={header.city} onChange={e => setHeader({...header, city: e.target.value})} placeholder="Ej: Buenos Aires" />
                 </div>
-                
+
+                <div className="md:col-span-2 space-y-2">
+                  <Label className="text-xs font-bold uppercase text-muted-foreground flex items-center gap-1">
+                    <Truck className="w-3.5 h-3.5" /> Repartidor <span className="text-destructive">*</span>
+                  </Label>
+                  <Select value={header.deliveryPersonId} onValueChange={handleDeliveryChange}>
+                    <SelectTrigger className="h-11 bg-white border-none shadow-sm"><SelectValue placeholder="Seleccionar repartidor..." /></SelectTrigger>
+                    <SelectContent>
+                      {users.filter(u => u.role === 'delivery').map(d => (
+                        <SelectItem key={d.id} value={d.id}>{d.name} ({d.city})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 <div className="md:col-span-2 space-y-4 pt-4 border-t border-primary/10">
                   <div className="space-y-2">
                     <Label className="flex items-center gap-2 text-sm font-black uppercase text-primary tracking-widest">
@@ -482,7 +519,7 @@ export default function SalesPage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label className="flex items-center gap-2 text-xs font-bold uppercase text-muted-foreground">
-                        <Phone className="w-3.5 h-3.5" /> Teléfono (Opcional)
+                        <Phone className="w-3.5 h-3.5" /> Teléfono
                       </Label>
                       <Input 
                         className="h-12 bg-white border-none shadow-sm font-bold" 
@@ -493,7 +530,7 @@ export default function SalesPage() {
                     </div>
                     <div className="space-y-2">
                       <Label className="flex items-center gap-2 text-xs font-bold uppercase text-muted-foreground">
-                        <MapPin className="w-3.5 h-3.5" /> Dirección de Entrega (Opcional)
+                        <MapPin className="w-3.5 h-3.5" /> Dirección de Entrega
                       </Label>
                       <Input 
                         className="h-12 bg-white border-none shadow-sm font-bold" 
@@ -525,7 +562,9 @@ export default function SalesPage() {
                     </TableHeader>
                     <TableBody>
                       {products.map(p => {
-                        const stock = inventory.find(i => i.productId === p.id && i.sellerId === header.sellerId)?.quantity || 0;
+                        const stock = header.deliveryPersonId
+                          ? (inventory.find(i => i.productId === p.id && i.deliveryPersonId === header.deliveryPersonId)?.quantity ?? 0)
+                          : 0;
                         const itemData = batchItems[p.id] || { quantity: '', price: p.price.toString(), commission: p.defaultCommission.toString() };
                         const isSelected = parseInt(itemData.quantity) > 0;
                         
@@ -551,7 +590,7 @@ export default function SalesPage() {
                                 )}
                                 value={itemData.quantity}
                                 onChange={(e) => handleBatchUpdate(p.id, 'quantity', e.target.value)}
-                                disabled={!header.sellerId || stock === 0}
+                                disabled={!header.deliveryPersonId || stock === 0}
                               />
                               {stockErrors[p.id] && (
                                 <p className="text-[10px] text-destructive font-bold mt-0.5 text-center">
@@ -567,7 +606,7 @@ export default function SalesPage() {
                                   className="h-9 w-24 text-right text-xs font-bold border-none bg-muted/30 focus:bg-white focus:ring-1 focus:ring-primary"
                                   value={itemData.price}
                                   onChange={(e) => handleBatchUpdate(p.id, 'price', e.target.value)}
-                                  disabled={!header.sellerId}
+                                  disabled={!header.deliveryPersonId}
                                 />
                               </div>
                             </TableCell>
@@ -640,7 +679,7 @@ export default function SalesPage() {
                 </div>
               )}
 
-              <Button onClick={handleRegister} className="w-full gap-3 h-16 text-xl font-black shadow-2xl rounded-2xl transition-all hover:scale-[1.02]" disabled={totals.itemsToRegister.length === 0 || !header.sellerId || hasStockError}>
+              <Button onClick={handleRegister} className="w-full gap-3 h-16 text-xl font-black shadow-2xl rounded-2xl transition-all hover:scale-[1.02]" disabled={totals.itemsToRegister.length === 0 || !header.sellerId || !header.deliveryPersonId || hasStockError}>
                 <Send className="w-6 h-6" /> Registrar y Finalizar Venta
               </Button>
             </div>
@@ -887,6 +926,18 @@ export default function SalesPage() {
                                 )}
                               </TableCell>
                               <TableCell className="text-right pr-6">
+                                {['delivery_failed', 'pending_return'].includes(sale.status) ? (
+                                  <div className="flex items-center justify-end gap-2">
+                                    {SALE_STATUS_BADGE_CONFIG[sale.status] && (
+                                      <Badge className={cn('text-[9px] font-black uppercase border-none', SALE_STATUS_BADGE_CONFIG[sale.status].color)}>
+                                        {SALE_STATUS_BADGE_CONFIG[sale.status].label}
+                                      </Badge>
+                                    )}
+                                    {sale.failureReason && (
+                                      <span className="text-[9px] text-red-500 italic max-w-[120px] truncate">{sale.failureReason}</span>
+                                    )}
+                                  </div>
+                                ) : (
                                 <div className="flex items-center justify-end gap-2">
                                   {deliveryPersons.length > 0 && !FINAL_STATUSES.includes(sale.status) && (
                                     <Dialog open={assigningDeliveryForSaleId === sale.id} onOpenChange={(open) => setAssigningDeliveryForSaleId(open ? sale.id : null)}>
@@ -943,9 +994,13 @@ export default function SalesPage() {
                                       </AlertDialogTrigger>
                                       <AlertDialogContent>
                                         <AlertDialogHeader>
-                                          <AlertDialogTitle>¿Eliminar esta venta?</AlertDialogTitle>
+                                          <AlertDialogTitle>
+                                            {sale.status === 'delivered' ? '¿Eliminar esta venta entregada?' : '¿Eliminar esta venta?'}
+                                          </AlertDialogTitle>
                                           <AlertDialogDescription>
-                                            Esta acción no se puede deshacer. El stock se devolverá al inventario del vendedor automáticamente.
+                                            {sale.status === 'delivered'
+                                              ? 'El pedido ya fue entregado. Esta acción no puede deshacerse.'
+                                              : 'Esta acción no se puede deshacer. El stock se devolverá al inventario del vendedor automáticamente.'}
                                           </AlertDialogDescription>
                                         </AlertDialogHeader>
                                         <AlertDialogFooter>
@@ -958,6 +1013,7 @@ export default function SalesPage() {
                                     </AlertDialog>
                                   )}
                                 </div>
+                                )}
                               </TableCell>
                             </TableRow>
                           ))}

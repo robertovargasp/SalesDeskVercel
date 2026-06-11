@@ -41,8 +41,9 @@ export interface Product {
 export interface InventoryItem {
   id: string;
   productId: string;
-  sellerId: string;
+  deliveryPersonId: string;
   quantity: number;
+  reservedQuantity: number;
 }
 
 export type AssignmentStatus = 'pending' | 'confirmed' | 'disputed';
@@ -52,7 +53,7 @@ export type MovementReason = 'load' | 'sale' | 'adjustment' | 'return' | 'correc
 export interface InventoryAssignment {
   id: string;
   productId: string;
-  sellerId: string;
+  deliveryPersonId: string;
   quantity: number;
   type: MovementType;
   reason: MovementReason;
@@ -121,6 +122,7 @@ export interface KardexEntry {
   id: string;
   productId: string;
   sellerId: string;
+  deliveryPersonId?: string;
   type: MovementType;
   reason: MovementReason;
   quantity: number;

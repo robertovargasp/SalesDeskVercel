@@ -30,11 +30,13 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
 };
 
 const STATUS_FILTER_OPTIONS = [
-  { value: 'en_ruta',    label: 'En Ruta',    statuses: ['accepted', 'contacting', 'scheduled', 'in_transit'] },
-  { value: 'completada', label: 'Completada', statuses: ['delivered', 'delivery_confirmed'] },
-  { value: 'liquidada',  label: 'Liquidada',  statuses: ['paid'] },
-  { value: 'cancelada',  label: 'Cancelada',  statuses: ['cancelled'] },
-  { value: 'fallida',    label: 'Fallida',    statuses: ['delivery_failed'] },
+  { value: 'por_confirmar', label: 'Por Confirmar', statuses: ['assigned', 'accepted'] },
+  { value: 'en_ruta',       label: 'En Ruta',       statuses: ['contacting', 'scheduled', 'in_transit'] },
+  { value: 'completada',    label: 'Completada',    statuses: ['delivered', 'delivery_confirmed'] },
+  { value: 'liquidada',     label: 'Liquidada',     statuses: ['paid'] },
+  { value: 'devolucion',    label: 'Devolución',    statuses: ['pending_return'] },
+  { value: 'fallida',       label: 'Fallida',       statuses: ['delivery_failed'] },
+  { value: 'cancelada',     label: 'Cancelada',     statuses: ['cancelled'] },
 ];
 
 function StatusBadge({ status, failureReason }: { status: string; failureReason?: string | null }) {
@@ -99,11 +101,13 @@ export default function SellerDeliveryPage() {
   // ── Filtrado combinado para "Actividad por Repartidor" ───────────────
   const filteredForActivity = useMemo(() => {
     const STATUS_GROUPS: Record<string, string[]> = {
-      en_ruta:    ['accepted', 'contacting', 'scheduled', 'in_transit'],
-      completada: ['delivered', 'delivery_confirmed'],
-      liquidada:  ['paid'],
-      cancelada:  ['cancelled'],
-      fallida:    ['delivery_failed'],
+      por_confirmar: ['assigned', 'accepted'],
+      en_ruta:       ['contacting', 'scheduled', 'in_transit'],
+      completada:    ['delivered', 'delivery_confirmed'],
+      liquidada:     ['paid'],
+      devolucion:    ['pending_return'],
+      fallida:       ['delivery_failed'],
+      cancelada:     ['cancelled'],
     };
     let result = assignedSales;
     if (filterMetric === 'active')         result = result.filter(s => !['delivered', 'paid', 'cancelled', 'delivery_failed'].includes(s.status));

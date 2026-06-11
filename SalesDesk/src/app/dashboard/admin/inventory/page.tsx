@@ -31,16 +31,16 @@ const REASON_LABELS: Record<MovementReason, string> = {
 
 export default function InventoryPage() {
   const { products, users, inventory, assignments, kardex, kardexHasMore, assignInventory, adjustInventory, loadMoreKardex } = useStore();
-  const sellers = users.filter(u => u.role === 'seller');
+  const deliveryPersons = users.filter(u => u.role === 'delivery');
 
-  const [selectedSellerId, setSelectedSellerId] = useState('');
-  const [filterSellerId, setFilterSellerId] = useState('all');
+  const [selectedDeliveryId, setSelectedDeliveryId] = useState('');
+  const [filterDeliveryId, setFilterDeliveryId] = useState('all');
   const [batchQuantities, setBatchQuantities] = useState<Record<string, string>>({});
 
   // Adjustment State
   const [isAdjusting, setIsAdjusting] = useState(false);
   const [adjData, setAdjData] = useState({
-    sellerId: '',
+    deliveryPersonId: '',
     productId: '',
     quantity: '',
     type: 'addition' as MovementType,
@@ -50,8 +50,14 @@ export default function InventoryPage() {
 
   const handleBatchAssign = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedSellerId) {
-      toast({ variant: "destructive", title: "Falta Vendedor", description: "Selecciona un vendedor para realizar la carga." });
+    if (!selectedDeliveryId) {
+      toast({ variant: "destructive", title: "Falta Repartidor", description: "Selecciona un repartidor para realizar la carga." });
+      return;
+    }
+
+    const hasNegative = Object.values(batchQuantities).some(qty => parseInt(qty) < 0);
+    if (hasNegative) {
+      toast({ variant: 'destructive', title: 'Cantidad inválida', description: 'Las cantidades no pueden ser negativas.' });
       return;
     }
 
@@ -65,21 +71,32 @@ export default function InventoryPage() {
     }
 
     updates.forEach(update => {
-      assignInventory(update.productId, selectedSellerId, update.quantity);
+      assignInventory(update.productId, selectedDeliveryId, update.quantity);
     });
 
     setBatchQuantities({});
-    setSelectedSellerId('');
-    toast({ title: "Movimiento Registrado", description: `Se han enviado productos. Esperando confirmación.` });
+    setSelectedDeliveryId('');
+    toast({ title: "Movimiento Registrado", description: `Se han enviado productos. Esperando confirmación del repartidor.` });
   };
 
   const handleAdjustInventory = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!adjData.sellerId || !adjData.productId || !adjData.quantity) return;
+    if (!adjData.deliveryPersonId) {
+      toast({ variant: 'destructive', title: 'Repartidor requerido', description: 'Selecciona un repartidor para el ajuste.' });
+      return;
+    }
+    if (!adjData.productId) {
+      toast({ variant: 'destructive', title: 'Producto requerido', description: 'Selecciona el producto a ajustar.' });
+      return;
+    }
+    if (!adjData.quantity || parseInt(adjData.quantity) <= 0) {
+      toast({ variant: 'destructive', title: 'Cantidad inválida', description: 'La cantidad debe ser mayor a 0.' });
+      return;
+    }
 
     adjustInventory(
       adjData.productId,
-      adjData.sellerId,
+      adjData.deliveryPersonId,
       parseInt(adjData.quantity),
       adjData.type,
       adjData.reason,
@@ -87,7 +104,7 @@ export default function InventoryPage() {
     );
 
     setIsAdjusting(false);
-    setAdjData({ sellerId: '', productId: '', quantity: '', type: 'addition', reason: 'adjustment', notes: '' });
+    setAdjData({ deliveryPersonId: '', productId: '', quantity: '', type: 'addition', reason: 'adjustment', notes: '' });
   };
 
   const handleQtyChange = (productId: string, value: string) => {
@@ -100,45 +117,45 @@ export default function InventoryPage() {
     return products.flatMap(p => {
       const minStock = p.minStock ?? 4;
       return inventory
-        .filter(i => i.productId === p.id && i.quantity <= minStock && i.quantity > 0)
+        .filter(i => i.productId === p.id && (i.quantity - i.reservedQuantity) <= minStock && i.quantity > 0)
         .map(i => ({
           product: p,
-          seller: users.find(u => u.id === i.sellerId),
-          quantity: i.quantity,
+          deliveryPerson: users.find(u => u.id === i.deliveryPersonId),
+          quantity: i.quantity - i.reservedQuantity,
           minStock
         }));
     });
   }, [products, inventory, users]);
 
-  // Group inventory by all unique seller IDs present in inventory, not just active users.
-  // A product appears only if the seller has stock > 0 OR an active assignment (pending/disputed).
-  const sellerInventoryMap = useMemo(() => {
-    const sellerIds = Array.from(new Set(inventory.map(i => i.sellerId)));
+  const deliveryInventoryMap = useMemo(() => {
+    const dpIds = Array.from(new Set(inventory.map(i => i.deliveryPersonId)));
 
-    return sellerIds.map(sid => {
-      const seller = users.find(u => u.id === sid);
-      const items = inventory.filter(i => i.sellerId === sid);
+    return dpIds.map(dpid => {
+      const deliveryPerson = users.find(u => u.id === dpid);
+      const items = inventory.filter(i => i.deliveryPersonId === dpid);
 
-      const sellerProducts = products
+      const dpProducts = products
         .map(p => {
-          const qty = items.find(i => i.productId === p.id)?.quantity || 0;
+          const invItem = items.find(i => i.productId === p.id);
+          const qty = invItem?.quantity || 0;
+          const reserved = invItem?.reservedQuantity ?? 0;
           const hasPendingAssignment = assignments.some(
-            a => a.sellerId === sid && a.productId === p.id &&
+            a => a.deliveryPersonId === dpid && a.productId === p.id &&
               (a.status === 'pending' || a.status === 'disputed')
           );
-          return { product: p, quantity: qty, value: qty * p.price, hasPendingAssignment };
+          return { product: p, quantity: qty, reservedQuantity: reserved, value: qty * p.price, hasPendingAssignment };
         })
         .filter(item => item.quantity > 0 || item.hasPendingAssignment);
 
       return {
-        seller: seller || { name: `Vendedor Eliminado`, city: 'N/A', id: sid },
-        items: sellerProducts.filter(() => filterSellerId === 'all' || sid === filterSellerId),
-        totalValue: sellerProducts.reduce((acc, curr) => acc + curr.value, 0)
+        deliveryPerson: deliveryPerson || { name: `Repartidor Eliminado`, city: 'N/A', id: dpid },
+        items: dpProducts.filter(() => filterDeliveryId === 'all' || dpid === filterDeliveryId),
+        totalValue: dpProducts.reduce((acc, curr) => acc + curr.value, 0)
       };
-    }).filter(group => group.items.length > 0 && (filterSellerId === 'all' || group.seller.id === filterSellerId));
-  }, [inventory, users, products, assignments, filterSellerId]);
+    }).filter(group => group.items.length > 0 && (filterDeliveryId === 'all' || group.deliveryPerson.id === filterDeliveryId));
+  }, [inventory, users, products, assignments, filterDeliveryId]);
 
-  const [kardexSeller, setKardexSeller] = useState('all');
+  const [kardexDelivery, setKardexDelivery] = useState('all');
   const [kardexProduct, setKardexProduct] = useState('all');
 
   // ── Por Ciudad ──────────────────────────────────────────────────────────────
@@ -147,8 +164,8 @@ export default function InventoryPage() {
   const inventoryCities = useMemo(() => {
     const cities = new Set<string>();
     inventory.forEach(item => {
-      const seller = users.find(u => u.id === item.sellerId);
-      if (seller?.city?.trim()) cities.add(seller.city.trim());
+      const deliveryPerson = users.find(u => u.id === item.deliveryPersonId);
+      if (deliveryPerson?.city?.trim()) cities.add(deliveryPerson.city.trim());
     });
     return Array.from(cities).sort();
   }, [inventory, users]);
@@ -157,9 +174,9 @@ export default function InventoryPage() {
     return inventoryCities
       .filter(city => selectedCity === 'all' || city === selectedCity)
       .map(city => {
-        const sellersInCity = users.filter(u => u.city?.trim() === city && u.role === 'seller');
-        const sellerIds = new Set(sellersInCity.map(s => s.id));
-        const cityItems = inventory.filter(i => sellerIds.has(i.sellerId));
+        const deliveryPersonsInCity = users.filter(u => u.city?.trim() === city && u.role === 'delivery');
+        const dpIds = new Set(deliveryPersonsInCity.map(d => d.id));
+        const cityItems = inventory.filter(i => dpIds.has(i.deliveryPersonId));
 
         const productTotals = products
           .map(p => ({
@@ -173,7 +190,7 @@ export default function InventoryPage() {
         return {
           city,
           productTotals,
-          sellerCount: sellersInCity.length,
+          deliveryCount: deliveryPersonsInCity.length,
           totalUnits: productTotals.reduce((sum, pt) => sum + pt.total, 0),
         };
       })
@@ -182,30 +199,30 @@ export default function InventoryPage() {
 
   const filteredKardex = useMemo(() => {
     return kardex.filter(k => {
-      const matchSeller = kardexSeller === 'all' || k.sellerId === kardexSeller;
+      const matchDelivery = kardexDelivery === 'all' || k.deliveryPersonId === kardexDelivery;
       const matchProduct = kardexProduct === 'all' || k.productId === kardexProduct;
-      return matchSeller && matchProduct;
+      return matchDelivery && matchProduct;
     });
-  }, [kardex, kardexSeller, kardexProduct]);
+  }, [kardex, kardexDelivery, kardexProduct]);
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-3xl font-black tracking-tight text-primary">Control de Mercancía</h1>
-          <p className="text-muted-foreground text-sm">Estado actual de stock por vendedor</p>
+          <p className="text-muted-foreground text-sm">Estado actual de stock por repartidor</p>
         </div>
         <div className="flex items-center gap-3">
-          <Select value={filterSellerId} onValueChange={setFilterSellerId}>
+          <Select value={filterDeliveryId} onValueChange={setFilterDeliveryId}>
             <SelectTrigger className="w-[220px] bg-white border-none shadow-sm rounded-xl h-11">
               <div className="flex items-center gap-2">
                 <Filter className="w-4 h-4 text-primary" />
-                <SelectValue placeholder="Filtrar Vendedor" />
+                <SelectValue placeholder="Filtrar Repartidor" />
               </div>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Todos los Vendedores</SelectItem>
-              {sellers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+              <SelectItem value="all">Todos los Repartidores</SelectItem>
+              {deliveryPersons.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
             </SelectContent>
           </Select>
           
@@ -223,11 +240,11 @@ export default function InventoryPage() {
               <form onSubmit={handleAdjustInventory} className="space-y-4 pt-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label className="text-[10px] font-bold uppercase">Vendedor</Label>
-                    <Select value={adjData.sellerId} onValueChange={(val) => setAdjData({...adjData, sellerId: val})}>
+                    <Label className="text-[10px] font-bold uppercase">Repartidor</Label>
+                    <Select value={adjData.deliveryPersonId} onValueChange={(val) => setAdjData({...adjData, deliveryPersonId: val})}>
                       <SelectTrigger><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
                       <SelectContent>
-                        {sellers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                        {deliveryPersons.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
@@ -271,7 +288,7 @@ export default function InventoryPage() {
         <Alert variant="destructive" className="bg-red-50 border-red-200 border-l-4">
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle className="font-bold">Hay Disputas Pendientes</AlertTitle>
-          <AlertDescription>Un vendedor reportó una discrepancia en su última carga.</AlertDescription>
+          <AlertDescription>Un repartidor reportó una discrepancia en su última carga.</AlertDescription>
         </Alert>
       )}
 
@@ -283,7 +300,7 @@ export default function InventoryPage() {
             <div className="flex flex-wrap gap-2 mt-2">
               {lowStockItems.map((item, idx) => (
                 <span key={idx} className="text-[11px] font-bold bg-orange-100 text-orange-800 px-2 py-0.5 rounded-full border border-orange-200">
-                  {item.product.name} — {item.seller?.name || 'Vendedor'}: {item.quantity} uds (mín. {item.minStock})
+                  {item.product.name} — {item.deliveryPerson?.name || 'Repartidor'}: {item.quantity} uds (mín. {item.minStock})
                 </span>
               ))}
             </div>
@@ -301,16 +318,16 @@ export default function InventoryPage() {
         <TabsContent value="stock">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         <div className="lg:col-span-8 space-y-8">
-          {sellerInventoryMap.map((group) => (
-            <Card key={group.seller.id} className="border-none shadow-xl overflow-hidden bg-white rounded-3xl">
+          {deliveryInventoryMap.map((group) => (
+            <Card key={group.deliveryPerson.id} className="border-none shadow-xl overflow-hidden bg-white rounded-3xl">
               <CardHeader className="bg-muted/30 pb-6 pt-8 px-8 flex flex-row items-center justify-between">
                 <div className="flex items-center gap-4">
                   <div className="w-14 h-14 rounded-2xl bg-primary shadow-lg shadow-primary/20 flex items-center justify-center text-primary-foreground text-xl font-black">
-                    {group.seller.name.charAt(0)}
+                    {group.deliveryPerson.name.charAt(0)}
                   </div>
                   <div>
-                    <CardTitle className="text-xl font-black">{group.seller.name}</CardTitle>
-                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">{group.seller.city}</p>
+                    <CardTitle className="text-xl font-black">{group.deliveryPerson.name}</CardTitle>
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">{group.deliveryPerson.city}</p>
                   </div>
                 </div>
                 <div className="text-right hidden sm:block">
@@ -336,17 +353,25 @@ export default function InventoryPage() {
                           <p className="text-[10px] text-muted-foreground font-medium">${item.product.price.toLocaleString()} c/u</p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-12">
-                         <div className="text-center min-w-[80px]">
-                           <p className="text-[9px] font-black text-muted-foreground uppercase tracking-widest mb-1">Stock</p>
-                           <p className={cn(
-                             "text-3xl font-black tracking-tighter",
-                             item.quantity === 0 ? "text-muted-foreground/20" : 
-                             item.quantity < 5 ? "text-orange-500" : "text-foreground"
-                           )}>
-                             {item.quantity}
-                           </p>
-                         </div>
+                      <div className="flex items-center gap-6">
+                        <div className="text-center min-w-[60px]">
+                          <p className="text-[9px] font-black text-muted-foreground uppercase tracking-widest mb-1">Total</p>
+                          <p className="text-2xl font-black tracking-tighter text-foreground">{item.quantity}</p>
+                        </div>
+                        <div className="text-center min-w-[60px]">
+                          <p className="text-[9px] font-black text-orange-500 uppercase tracking-widest mb-1">Reservado</p>
+                          <p className="text-2xl font-black tracking-tighter text-orange-500">{item.reservedQuantity}</p>
+                        </div>
+                        <div className="text-center min-w-[60px]">
+                          <p className="text-[9px] font-black text-green-600 uppercase tracking-widest mb-1">Disponible</p>
+                          <p className={cn(
+                            "text-2xl font-black tracking-tighter",
+                            (item.quantity - item.reservedQuantity) === 0 ? "text-muted-foreground/30" :
+                            (item.quantity - item.reservedQuantity) < 5 ? "text-orange-500" : "text-green-600"
+                          )}>
+                            {item.quantity - item.reservedQuantity}
+                          </p>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -363,7 +388,7 @@ export default function InventoryPage() {
             </Card>
           ))}
           
-          {sellerInventoryMap.length === 0 && (
+          {deliveryInventoryMap.length === 0 && (
             <div className="py-32 text-center bg-white rounded-3xl border-2 border-dashed flex flex-col items-center gap-4">
                <div className="bg-muted/50 p-6 rounded-full"><Search className="w-12 h-12 text-muted-foreground/30" /></div>
                <div>
@@ -383,7 +408,7 @@ export default function InventoryPage() {
                 </div>
                 <div>
                   <CardTitle className="text-xl font-black">Enviar Mercancía</CardTitle>
-                  <p className="text-muted-foreground text-xs font-medium">Asigna stock a tus vendedores</p>
+                  <p className="text-muted-foreground text-xs font-medium">Asigna stock a tus repartidores</p>
                 </div>
               </div>
             </CardHeader>
@@ -391,12 +416,12 @@ export default function InventoryPage() {
               <form onSubmit={handleBatchAssign} className="space-y-8">
                 <div className="space-y-3">
                   <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Responsable de Recepción</Label>
-                  <Select value={selectedSellerId} onValueChange={setSelectedSellerId}>
+                  <Select value={selectedDeliveryId} onValueChange={setSelectedDeliveryId}>
                     <SelectTrigger className="h-14 bg-muted/20 border-none shadow-inner rounded-2xl px-6 focus:ring-2 focus:ring-primary/20">
-                      <SelectValue placeholder="Seleccionar vendedor..." />
+                      <SelectValue placeholder="Seleccionar repartidor..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {sellers.map(s => <SelectItem key={s.id} value={s.id}>{s.name} ({s.city})</SelectItem>)}
+                      {deliveryPersons.map(d => <SelectItem key={d.id} value={d.id}>{d.name} ({d.city})</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -421,7 +446,7 @@ export default function InventoryPage() {
                   </div>
                 </div>
 
-                <Button type="submit" className="w-full gap-3 h-16 text-lg font-black shadow-xl shadow-primary/20 rounded-2xl transition-all hover:scale-[1.02]" disabled={!selectedSellerId}>
+                <Button type="submit" className="w-full gap-3 h-16 text-lg font-black shadow-xl shadow-primary/20 rounded-2xl transition-all hover:scale-[1.02]" disabled={!selectedDeliveryId}>
                   <Send className="w-5 h-5" /> Confirmar Envío
                 </Button>
               </form>
@@ -461,7 +486,7 @@ export default function InventoryPage() {
               </div>
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-                {cityInventoryMap.map(({ city, productTotals, sellerCount, totalUnits }) => (
+                {cityInventoryMap.map(({ city, productTotals, deliveryCount, totalUnits }) => (
                   <Card key={city} className="border-none shadow-sm rounded-2xl overflow-hidden">
                     <CardHeader className="bg-primary/5 pb-4">
                       <div className="flex items-center justify-between">
@@ -472,7 +497,7 @@ export default function InventoryPage() {
                           <div>
                             <CardTitle className="text-base font-black">{city}</CardTitle>
                             <p className="text-[10px] text-muted-foreground">
-                              {sellerCount} vendedor{sellerCount !== 1 ? 'es' : ''}
+                              {deliveryCount} repartidor{deliveryCount !== 1 ? 'es' : ''}
                             </p>
                           </div>
                         </div>
@@ -518,13 +543,13 @@ export default function InventoryPage() {
                   Historial de Movimientos ({filteredKardex.length})
                 </CardTitle>
                 <div className="flex gap-2 flex-wrap">
-                  <Select value={kardexSeller} onValueChange={setKardexSeller}>
+                  <Select value={kardexDelivery} onValueChange={setKardexDelivery}>
                     <SelectTrigger className="w-44 h-9 text-xs">
-                      <SelectValue placeholder="Vendedor" />
+                      <SelectValue placeholder="Repartidor" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">Todos los vendedores</SelectItem>
-                      {sellers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                      <SelectItem value="all">Todos los repartidores</SelectItem>
+                      {deliveryPersons.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                   <Select value={kardexProduct} onValueChange={setKardexProduct}>
@@ -545,7 +570,7 @@ export default function InventoryPage() {
                   <TableRow>
                     <TableHead className="text-[10px] uppercase">Fecha</TableHead>
                     <TableHead className="text-[10px] uppercase">Producto</TableHead>
-                    <TableHead className="text-[10px] uppercase">Vendedor</TableHead>
+                    <TableHead className="text-[10px] uppercase">Repartidor</TableHead>
                     <TableHead className="text-[10px] uppercase">Motivo</TableHead>
                     <TableHead className="text-[10px] uppercase text-right">Cantidad</TableHead>
                     <TableHead className="text-[10px] uppercase text-right">Antes</TableHead>
@@ -563,7 +588,7 @@ export default function InventoryPage() {
                   ) : (
                     filteredKardex.map(entry => {
                       const product = products.find(p => p.id === entry.productId);
-                      const seller = users.find(u => u.id === entry.sellerId);
+                      const deliveryPerson = users.find(u => u.id === entry.deliveryPersonId);
                       const isAddition = entry.type === 'addition';
                       return (
                         <TableRow key={entry.id}>
@@ -571,7 +596,7 @@ export default function InventoryPage() {
                             {format(new Date(entry.createdAt), 'dd/MM/yy HH:mm', { locale: es })}
                           </TableCell>
                           <TableCell className="text-xs font-medium">{product?.name || entry.productId}</TableCell>
-                          <TableCell className="text-xs">{seller?.name || '—'}</TableCell>
+                          <TableCell className="text-xs">{deliveryPerson?.name || '—'}</TableCell>
                           <TableCell>
                             <Badge className={cn(
                               "text-[10px] border-0",

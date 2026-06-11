@@ -34,8 +34,9 @@ export function mapInventoryItem(row: any): InventoryItem {
   return {
     id: row.id,
     productId: row.product_id,
-    sellerId: row.seller_id,
+    deliveryPersonId: row.delivery_person_id,
     quantity: row.quantity,
+    reservedQuantity: row.reserved_quantity ?? 0,
   };
 }
 
@@ -43,7 +44,7 @@ export function mapAssignment(row: any): InventoryAssignment {
   return {
     id: row.id,
     productId: row.product_id,
-    sellerId: row.seller_id,
+    deliveryPersonId: row.delivery_person_id,
     quantity: row.quantity,
     type: row.type,
     reason: row.reason,
@@ -126,7 +127,8 @@ export function mapKardex(row: any): KardexEntry {
   return {
     id: row.id,
     productId: row.product_id,
-    sellerId: row.seller_id,
+    sellerId: row.seller_id ?? '',
+    deliveryPersonId: row.delivery_person_id ?? undefined,
     type: row.type,
     reason: row.reason,
     quantity: row.quantity,

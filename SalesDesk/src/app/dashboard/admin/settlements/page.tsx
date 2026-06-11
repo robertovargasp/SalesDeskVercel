@@ -64,8 +64,12 @@ export default function AdminSettlementsPage() {
   const summary = useMemo(() => {
     const totalVenta = filteredSales.reduce((acc, s) => acc + s.totalVenta, 0);
     const totalComision = filteredSales.reduce((acc, s) => acc + s.totalComision, 0);
+    // IDs de settlements ya confirmados — solo esos se excluyen de A RECIBIR
+    const confirmedSettlementIds = new Set(
+      settlements.filter(s => s.status === 'confirmed').map(s => s.id)
+    );
     const aRecibir = filteredSales
-      .filter(s => ['delivered', 'pending_return'].includes(s.status) && !s.settlementId)
+      .filter(s => !s.settlementId || !confirmedSettlementIds.has(s.settlementId))
       .reduce((acc, s) => acc + s.totalDeposito, 0);
     return { totalVenta, totalComision, ventaNeta: totalVenta - totalComision, aRecibir };
   }, [filteredSales]);

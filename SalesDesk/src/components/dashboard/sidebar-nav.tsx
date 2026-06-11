@@ -35,7 +35,8 @@ const sellerLinks = [
 ];
 
 const deliveryLinks = [
-  { label: 'Mis Entregas', href: '/dashboard/delivery', icon: Truck },
+  { label: 'Mis Entregas',  href: '/dashboard/delivery',           icon: Truck },
+  { label: 'Mi Inventario', href: '/dashboard/delivery/inventory', icon: Package },
 ];
 
 const linksByRole: Record<UserRole, typeof adminLinks> = {

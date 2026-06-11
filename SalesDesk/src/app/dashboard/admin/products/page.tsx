@@ -26,16 +26,29 @@ export default function ProductsPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
+    if (!formData.name.trim()) {
+      toast({ variant: 'destructive', title: 'El nombre es requerido', description: 'Ingresa el nombre del producto.' });
+      return;
+    }
+
     const price = parseFloat(formData.price);
     const comm = parseFloat(formData.defaultCommission);
 
-    if (isNaN(price)) {
-      toast({ variant: "destructive", title: "Error", description: "Ingrese un precio válido." });
+    if (isNaN(price) || price <= 0) {
+      toast({ variant: 'destructive', title: 'Precio inválido', description: 'El precio debe ser mayor a 0.' });
+      return;
+    }
+    if (!isNaN(comm) && comm < 0) {
+      toast({ variant: 'destructive', title: 'Comisión inválida', description: 'La comisión no puede ser negativa.' });
       return;
     }
 
     const minStockVal = parseInt(formData.minStock);
+    if (!isNaN(minStockVal) && minStockVal < 0) {
+      toast({ variant: 'destructive', title: 'Stock mínimo inválido', description: 'El stock mínimo no puede ser negativo.' });
+      return;
+    }
     const data = {
       name: formData.name,
       price: price,

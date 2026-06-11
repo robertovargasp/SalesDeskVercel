@@ -400,16 +400,15 @@ export default function DashboardPage() {
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               {products
                 .filter(p => {
-                  const qty = inventory.find(i => i.productId === p.id && i.sellerId === currentUser.id)?.quantity ?? 0;
-                  const hasActiveAssignment = assignments.some(
-                    a => a.productId === p.id && a.sellerId === currentUser.id &&
-                      (a.status === 'pending' || a.status === 'confirmed')
-                  );
-                  return qty > 0 || hasActiveAssignment;
+                  const qty = inventory
+                    .filter(i => i.productId === p.id)
+                    .reduce((s, i) => s + i.quantity, 0);
+                  return qty > 0;
                 })
                 .map(p => {
-                  const inv = inventory.find(i => i.productId === p.id && i.sellerId === currentUser.id);
-                  const qty = inv?.quantity ?? 0;
+                  const qty = inventory
+                    .filter(i => i.productId === p.id)
+                    .reduce((s, i) => s + i.quantity, 0);
                   const minStock = p.minStock ?? 4;
                   return (
                     <div key={p.id} className={cn(

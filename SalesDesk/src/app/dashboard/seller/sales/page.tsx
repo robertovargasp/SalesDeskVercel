@@ -15,13 +15,13 @@ import { es } from 'date-fns/locale';
 import { applyDateFilter, DateRangeFilter, DATE_FILTER_LABELS } from '@/lib/date-filters';
 import {
   CheckCircle2,
-  Truck, 
-  Phone, 
-  MapPin, 
-  User, 
+  Truck,
+  Phone,
+  MapPin,
+  User,
   DollarSign, TrendingUp,
-  Package, 
-  ShoppingCart, 
+  Package,
+  ShoppingCart,
   ArrowLeft,
   ChevronRight,
   Clock,
@@ -36,7 +36,10 @@ import {
   MessageSquare,
   SlidersHorizontal,
   X,
-  Trash2
+  Trash2,
+  Plus,
+  Send,
+  Link
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -53,15 +56,17 @@ const STEPS = [
 ];
 
 const STATUS_FILTER_OPTIONS = [
-  { value: 'en_ruta',    label: 'En Ruta',    statuses: ['accepted', 'contacting', 'scheduled', 'in_transit'] },
-  { value: 'completada', label: 'Completada', statuses: ['delivered', 'delivery_confirmed'] },
-  { value: 'liquidada',  label: 'Liquidada',  statuses: ['paid'] },
-  { value: 'cancelada',  label: 'Cancelada',  statuses: ['cancelled'] },
-  { value: 'fallida',    label: 'Fallida',    statuses: ['delivery_failed'] },
+  { value: 'por_confirmar', label: 'Por Confirmar', statuses: ['assigned', 'accepted'] },
+  { value: 'en_ruta',       label: 'En Ruta',       statuses: ['contacting', 'scheduled', 'in_transit'] },
+  { value: 'completada',    label: 'Completada',    statuses: ['delivered', 'delivery_confirmed'] },
+  { value: 'liquidada',     label: 'Liquidada',     statuses: ['paid'] },
+  { value: 'devolucion',    label: 'Devolución',    statuses: ['pending_return'] },
+  { value: 'fallida',       label: 'Fallida',       statuses: ['delivery_failed'] },
+  { value: 'cancelada',     label: 'Cancelada',     statuses: ['cancelled'] },
 ];
 
 export default function SellerSalesPage() {
-  const { currentUser, users, sales, products, updateSaleStatus, assignDeliveryPerson, deleteSale } = useStore();
+  const { currentUser, users, sales, products, inventory, registerMultiSale, updateSaleStatus, assignDeliveryPerson, deleteSale } = useStore();
   const deliveryPersons = users.filter(u => u.role === 'delivery');
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
@@ -80,6 +85,95 @@ export default function SellerSalesPage() {
   const [deleteConfirmSaleId, setDeleteConfirmSaleId] = useState<string | null>(null);
 
   const mySales = sales.filter(s => s.sellerId === currentUser?.id);
+
+  // ── Nueva Venta ──────────────────────────────────────────────────────────
+  const [isNewSaleOpen, setIsNewSaleOpen] = useState(false);
+  const [nsDeliveryPersonId, setNsDeliveryPersonId] = useState('');
+  const [nsCity, setNsCity] = useState('');
+  const [nsCustomerName, setNsCustomerName] = useState('');
+  const [nsCustomerPhone, setNsCustomerPhone] = useState('');
+  const [nsCustomerAddress, setNsCustomerAddress] = useState('');
+  const [nsGoogleMapsLink, setNsGoogleMapsLink] = useState('');
+  const [nsNotes, setNsNotes] = useState('');
+  const [nsBatchItems, setNsBatchItems] = useState<Record<string, { quantity: string; price: string; commission: string }>>({});
+  const [nsPhoto, setNsPhoto] = useState<string | undefined>(undefined);
+  const [nsManualVenta, setNsManualVenta] = useState('');
+  const [nsManualComision, setNsManualComision] = useState('');
+
+  // Repartidores con stock (vinculados a pedidos del seller O con inventario disponible)
+  const availableDeliveryPersons = useMemo(() => {
+    const linkedIds = new Set(mySales.map(s => s.deliveryPersonId).filter(Boolean) as string[]);
+    const withInventory = new Set(inventory.map(i => i.deliveryPersonId));
+    return deliveryPersons.filter(d => linkedIds.has(d.id) || withInventory.has(d.id));
+  }, [deliveryPersons, mySales, inventory]);
+
+  const nsStockErrors = useMemo(() => {
+    if (!nsDeliveryPersonId) return {} as Record<string, { available: number; requested: number }>;
+    const errors: Record<string, { available: number; requested: number }> = {};
+    Object.entries(nsBatchItems).forEach(([productId, data]) => {
+      const qty = parseInt(data.quantity);
+      if (qty > 0) {
+        const available = inventory.find(i => i.productId === productId && i.deliveryPersonId === nsDeliveryPersonId)?.quantity ?? 0;
+        if (qty > available) errors[productId] = { available, requested: qty };
+      }
+    });
+    return errors;
+  }, [nsBatchItems, nsDeliveryPersonId, inventory]);
+
+  const nsTotals = useMemo(() => {
+    let calcVenta = 0; let calcComision = 0; const items: any[] = [];
+    Object.entries(nsBatchItems).forEach(([productId, data]) => {
+      const qty = parseInt(data.quantity);
+      if (qty > 0) {
+        const price = parseFloat(data.price) || 0;
+        const commission = parseFloat(data.commission) || 0;
+        const subtotal = qty * price;
+        calcVenta += subtotal; calcComision += qty * commission;
+        items.push({ productId, quantity: qty, priceAtSale: price, commissionAtSale: commission, subtotal });
+      }
+    });
+    const totalVenta = nsManualVenta !== '' ? parseFloat(nsManualVenta) : calcVenta;
+    const totalComision = nsManualComision !== '' ? parseFloat(nsManualComision) : calcComision;
+    return { calcVenta, calcComision, totalVenta, totalComision, totalDeposito: totalVenta - totalComision, items };
+  }, [nsBatchItems, nsManualVenta, nsManualComision]);
+
+  const resetNewSaleForm = () => {
+    setNsDeliveryPersonId(''); setNsCity(''); setNsCustomerName(''); setNsCustomerPhone('');
+    setNsCustomerAddress(''); setNsGoogleMapsLink(''); setNsNotes('');
+    setNsPhoto(undefined); setNsManualVenta(''); setNsManualComision('');
+    const init: Record<string, any> = {};
+    products.forEach(p => { init[p.id] = { quantity: '', price: p.price.toString(), commission: p.defaultCommission.toString() }; });
+    setNsBatchItems(init);
+  };
+
+  const handleNewSaleDeliveryChange = (dpId: string) => {
+    setNsDeliveryPersonId(dpId);
+    const dp = users.find(u => u.id === dpId);
+    setNsCity(dp?.city || '');
+    const init: Record<string, any> = {};
+    products.forEach(p => { init[p.id] = { quantity: '', price: p.price.toString(), commission: p.defaultCommission.toString() }; });
+    setNsBatchItems(init);
+  };
+
+  const handleNewSaleRegister = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!nsDeliveryPersonId) { toast({ variant: 'destructive', title: 'Repartidor requerido', description: 'Selecciona el repartidor que entregará el pedido.' }); return; }
+    if (!nsCustomerName.trim()) { toast({ variant: 'destructive', title: 'Cliente requerido', description: 'Ingresa el nombre del cliente.' }); return; }
+    if (!nsCustomerPhone.trim()) { toast({ variant: 'destructive', title: 'Teléfono requerido', description: 'Ingresa el número de contacto del cliente.' }); return; }
+    if (!nsCustomerAddress.trim()) { toast({ variant: 'destructive', title: 'Dirección requerida', description: 'Ingresa la dirección de entrega.' }); return; }
+    if (nsTotals.items.length === 0) { toast({ variant: 'destructive', title: 'Venta vacía', description: 'Ingresa cantidades para al menos un producto.' }); return; }
+    if (Object.keys(nsStockErrors).length > 0) { toast({ variant: 'destructive', title: 'Stock insuficiente', description: 'Corrige las cantidades marcadas antes de continuar.' }); return; }
+
+    registerMultiSale(
+      currentUser!.id, nsCity,
+      nsTotals.items, nsCustomerName, nsCustomerPhone, nsCustomerAddress,
+      nsNotes, nsTotals.totalVenta, nsTotals.totalComision,
+      nsGoogleMapsLink, nsPhoto, nsDeliveryPersonId
+    );
+    setIsNewSaleOpen(false);
+    resetNewSaleForm();
+  };
+
   const selectedSale = mySales.find(s => s.id === selectedSaleId);
 
   // Resumen por ciudad — agrupa las ventas activas (excluye canceladas/fallidas)
@@ -121,11 +215,13 @@ export default function SellerSalesPage() {
 
   const filteredSales = useMemo(() => {
     const STATUS_GROUPS: Record<string, string[]> = {
-      en_ruta:    ['accepted', 'contacting', 'scheduled', 'in_transit'],
-      completada: ['delivered', 'delivery_confirmed'],
-      liquidada:  ['paid'],
-      cancelada:  ['cancelled'],
-      fallida:    ['delivery_failed'],
+      por_confirmar: ['assigned', 'accepted'],
+      en_ruta:       ['contacting', 'scheduled', 'in_transit'],
+      completada:    ['delivered', 'delivery_confirmed'],
+      liquidada:     ['paid'],
+      devolucion:    ['pending_return'],
+      fallida:       ['delivery_failed'],
+      cancelada:     ['cancelled'],
     };
     let result = filterPeriod === 'all' ? mySales : applyDateFilter(mySales, filterPeriod);
     if (filterCity !== 'all') result = result.filter(s => s.city === filterCity);
@@ -336,6 +432,7 @@ export default function SellerSalesPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
           <div className="lg:col-span-2 space-y-6">
+            {!['delivery_failed', 'pending_return'].includes(selectedSale.status) && (
             <Card className="border-none shadow-sm rounded-2xl overflow-hidden">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-bold text-muted-foreground">Seguimiento del pedido</CardTitle>
@@ -389,6 +486,7 @@ export default function SellerSalesPage() {
                 </div>
               </CardContent>
             </Card>
+            )}
 
             {isSaleCompleted && (
               <Card className="border-none shadow-2xl bg-green-600 text-white rounded-3xl overflow-hidden animate-in zoom-in-95 duration-500">
@@ -399,6 +497,24 @@ export default function SellerSalesPage() {
                   <div>
                     <h2 className="text-2xl font-black tracking-tight">COMPLETADA</h2>
                     <p className="text-white/70 text-sm mt-1">El repartidor confirmó la entrega. No se requieren más acciones del vendedor.</p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {['delivery_failed', 'pending_return'].includes(selectedSale.status) && (
+              <Card className="border-none shadow-2xl bg-red-600 text-white rounded-3xl overflow-hidden animate-in zoom-in-95 duration-500">
+                <CardContent className="p-8 flex items-center gap-6">
+                  <div className="bg-white/20 p-4 rounded-2xl shrink-0">
+                    <XCircle className="w-10 h-10" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-black tracking-tight">ENTREGA FALLIDA</h2>
+                    {selectedSale.failureReason ? (
+                      <p className="text-white/80 text-sm mt-1 italic">"{selectedSale.failureReason}"</p>
+                    ) : (
+                      <p className="text-white/70 text-sm mt-1">El repartidor no pudo completar la entrega.</p>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -690,6 +806,194 @@ export default function SellerSalesPage() {
           <h1 className="text-3xl font-black tracking-tighter">Mis Ventas</h1>
           <p className="text-muted-foreground text-sm">Gestiona y actualiza el estado de tus entregas</p>
         </div>
+        <Dialog open={isNewSaleOpen} onOpenChange={(val) => { setIsNewSaleOpen(val); if (val) resetNewSaleForm(); }}>
+          <DialogTrigger asChild>
+            <Button className="gap-2 h-12 px-6 shadow-xl bg-primary hover:bg-primary/90">
+              <Plus className="w-5 h-5" /> Nueva Venta Directa
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-4xl max-h-[95vh] overflow-y-auto p-0 border-none shadow-2xl">
+            <div className="bg-primary p-6 text-primary-foreground">
+              <DialogHeader>
+                <div className="flex items-center gap-3">
+                  <div className="bg-white/20 p-2 rounded-xl"><ShoppingCart className="w-6 h-6" /></div>
+                  <div>
+                    <DialogTitle className="text-2xl font-bold">Registrar Venta Directa</DialogTitle>
+                    <p className="text-primary-foreground/70 text-sm">Completa el formulario para descontar stock y registrar el cobro.</p>
+                  </div>
+                </div>
+              </DialogHeader>
+            </div>
+            <div className="p-8 space-y-8">
+              {/* Repartidor + Ciudad */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-muted/30 p-8 rounded-3xl border border-dashed border-primary/20">
+                <div className="space-y-2">
+                  <Label className="text-xs font-bold uppercase text-muted-foreground flex items-center gap-1">
+                    <Truck className="w-3.5 h-3.5" /> Repartidor <span className="text-destructive">*</span>
+                  </Label>
+                  <Select value={nsDeliveryPersonId} onValueChange={handleNewSaleDeliveryChange}>
+                    <SelectTrigger className="h-11 bg-white border-none shadow-sm"><SelectValue placeholder="Seleccionar repartidor..." /></SelectTrigger>
+                    <SelectContent>
+                      {availableDeliveryPersons.map(d => (
+                        <SelectItem key={d.id} value={d.id}>{d.name} ({d.city})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs font-bold uppercase text-muted-foreground">Ciudad</Label>
+                  <Input className="h-11 bg-white border-none shadow-sm" value={nsCity} onChange={e => setNsCity(e.target.value)} placeholder="Ciudad del cliente" />
+                </div>
+
+                {/* Cliente */}
+                <div className="md:col-span-2 space-y-4 pt-4 border-t border-primary/10">
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-2 text-sm font-black uppercase text-primary tracking-widest">
+                      <User className="w-4 h-4" /> CLIENTE <span className="text-destructive text-[10px] font-bold">(OBLIGATORIO *)</span>
+                    </Label>
+                    <Input className="h-14 bg-white border-2 border-primary/20 shadow-sm text-lg font-bold rounded-2xl focus:border-primary" value={nsCustomerName} onChange={e => setNsCustomerName(e.target.value)} placeholder="Nombre completo del cliente" />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="flex items-center gap-2 text-xs font-bold uppercase text-muted-foreground"><Phone className="w-3.5 h-3.5" /> Teléfono</Label>
+                      <Input className="h-12 bg-white border-none shadow-sm" value={nsCustomerPhone} onChange={e => setNsCustomerPhone(e.target.value)} placeholder="Número de contacto" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="flex items-center gap-2 text-xs font-bold uppercase text-muted-foreground"><MapPin className="w-3.5 h-3.5" /> Dirección de Entrega *</Label>
+                      <Input className="h-12 bg-white border-none shadow-sm" value={nsCustomerAddress} onChange={e => setNsCustomerAddress(e.target.value)} placeholder="Calle, número, colonia..." />
+                    </div>
+                  </div>
+                </div>
+                <div className="md:col-span-2 space-y-2">
+                  <Label className="flex items-center gap-2 text-xs font-bold uppercase text-muted-foreground"><Link className="w-3.5 h-3.5" /> Link de Google Maps (Opcional)</Label>
+                  <Input className="h-11 bg-white border-none shadow-sm" value={nsGoogleMapsLink} onChange={e => setNsGoogleMapsLink(e.target.value)} placeholder="https://maps.app.goo.gl/..." />
+                </div>
+              </div>
+
+              {/* Productos */}
+              <div className="space-y-4">
+                <Label className="text-xs font-bold uppercase text-muted-foreground tracking-widest">Mercancía Entregada</Label>
+                <div className="rounded-2xl border bg-card shadow-sm overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-[10px] h-10 uppercase font-black text-left pl-6">Producto</th>
+                        <th className="text-[10px] h-10 text-center uppercase font-black">Stock</th>
+                        <th className="text-[10px] h-10 text-center uppercase font-black">Cant.</th>
+                        <th className="text-[10px] h-10 text-right uppercase font-black pr-6">Precio Unit.</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {products.map(p => {
+                        const stock = nsDeliveryPersonId
+                          ? (inventory.find(i => i.productId === p.id && i.deliveryPersonId === nsDeliveryPersonId)?.quantity ?? 0)
+                          : 0;
+                        const itemData = nsBatchItems[p.id] || { quantity: '', price: p.price.toString(), commission: p.defaultCommission.toString() };
+                        const isSelected = parseInt(itemData.quantity) > 0;
+                        return (
+                          <tr key={p.id} className={cn("h-14 border-t transition-colors", isSelected ? "bg-primary/5" : "hover:bg-muted/10")}>
+                            <td className="py-2 pl-6">
+                              <span className={cn("text-xs font-bold", isSelected ? "text-primary" : "")}>{p.name}</span>
+                            </td>
+                            <td className="py-2 text-center">
+                              <span className={cn("text-[10px] font-black px-2 py-0.5 rounded-md", stock < 5 ? "bg-red-100 text-red-700" : "bg-secondary text-secondary-foreground")}>{stock}</span>
+                            </td>
+                            <td className="py-2">
+                              <div className="flex flex-col items-center">
+                                <Input
+                                  type="number" min="0" max={stock} placeholder="0"
+                                  className={cn("h-9 w-16 mx-auto text-center text-xs font-bold border-none bg-muted/30 focus:bg-white", nsStockErrors[p.id] && "ring-1 ring-destructive bg-destructive/5")}
+                                  value={itemData.quantity}
+                                  onChange={e => setNsBatchItems(prev => ({ ...prev, [p.id]: { ...prev[p.id], quantity: e.target.value } }))}
+                                  disabled={!nsDeliveryPersonId || stock === 0}
+                                />
+                                {nsStockErrors[p.id] && <p className="text-[10px] text-destructive font-bold mt-0.5">Máx. {nsStockErrors[p.id].available}</p>}
+                              </div>
+                            </td>
+                            <td className="py-2 text-right pr-6">
+                              <div className="flex items-center justify-end gap-1">
+                                <span className="text-[10px] text-muted-foreground">$</span>
+                                <Input
+                                  type="number"
+                                  className="h-9 w-24 text-right text-xs font-bold border-none bg-muted/30 focus:bg-white"
+                                  value={itemData.price}
+                                  onChange={e => setNsBatchItems(prev => ({ ...prev, [p.id]: { ...prev[p.id], price: e.target.value } }))}
+                                  disabled={!nsDeliveryPersonId}
+                                />
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Foto */}
+              <div className="space-y-3">
+                <Label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">Foto de Comprobante (Opcional)</Label>
+                <div className="flex items-center gap-6">
+                  <Button type="button" variant="outline" className="gap-3 h-16 px-8 border-dashed border-2 bg-muted/10 hover:bg-primary/5 rounded-2xl" asChild>
+                    <label>
+                      <Camera className="w-6 h-6" /> <span className="font-black text-sm">{nsPhoto ? 'Cambiar Foto' : 'Subir Foto'}</span>
+                      <input type="file" className="hidden" accept="image/*" onChange={e => { const f = e.target.files?.[0]; if (f) { const r = new FileReader(); r.onloadend = () => setNsPhoto(r.result as string); r.readAsDataURL(f); } }} />
+                    </label>
+                  </Button>
+                  {nsPhoto && (
+                    <div className="relative">
+                      <img src={nsPhoto} alt="Preview" className="w-20 h-20 object-cover rounded-xl shadow-md border-2 border-primary/20" />
+                      <button onClick={() => setNsPhoto(undefined)} className="absolute -top-2 -right-2 bg-destructive text-white rounded-full p-1 shadow-lg">
+                        <XCircle className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Totales */}
+              {nsTotals.items.length > 0 && (
+                <div className="bg-primary/5 p-8 rounded-3xl space-y-6 border border-primary/20">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    <div className="space-y-3 bg-white p-5 rounded-2xl shadow-sm border border-primary/10">
+                      <Label className="text-[10px] text-muted-foreground uppercase font-black tracking-widest">Cobro al Cliente</Label>
+                      <div className="flex items-center gap-2">
+                        <div className="bg-primary/10 p-2 rounded-lg"><DollarSign className="w-4 h-4 text-primary" /></div>
+                        <Input type="number" className="h-10 text-xl font-black border-none focus:ring-0"
+                          value={nsManualVenta === '' ? nsTotals.calcVenta : nsManualVenta}
+                          onChange={e => setNsManualVenta(e.target.value)} />
+                      </div>
+                    </div>
+                    <div className="space-y-3 bg-white p-5 rounded-2xl shadow-sm border border-blue-100">
+                      <Label className="text-[10px] text-blue-600 uppercase font-black tracking-widest">Comisión Repartidor</Label>
+                      <div className="flex items-center gap-2">
+                        <div className="bg-blue-100 p-2 rounded-lg"><Truck className="w-4 h-4 text-blue-600" /></div>
+                        <Input type="number" className="h-10 text-xl font-black text-blue-600 border-none focus:ring-0"
+                          value={nsManualComision === '' ? nsTotals.calcComision : nsManualComision}
+                          onChange={e => setNsManualComision(e.target.value)} />
+                      </div>
+                    </div>
+                    <div className="space-y-3 bg-primary p-5 rounded-2xl shadow-lg flex flex-col justify-center">
+                      <Label className="text-[10px] text-primary-foreground/70 uppercase font-black tracking-widest">A PAGAR AL ADMIN</Label>
+                      <div className="flex items-center gap-3 text-primary-foreground">
+                        <CheckCircle2 className="w-6 h-6" />
+                        <p className="text-3xl font-black tracking-tighter">${nsTotals.totalDeposito.toLocaleString()}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <Button
+                onClick={handleNewSaleRegister}
+                className="w-full gap-3 h-16 text-xl font-black shadow-2xl rounded-2xl transition-all hover:scale-[1.02]"
+                disabled={nsTotals.items.length === 0 || !nsDeliveryPersonId || !nsCustomerPhone.trim() || !nsCustomerAddress.trim() || Object.keys(nsStockErrors).length > 0}
+              >
+                <Send className="w-6 h-6" /> Registrar y Finalizar Venta
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
 
       {/* ── Métricas ─────────────────────────────────────────────────────── */}
