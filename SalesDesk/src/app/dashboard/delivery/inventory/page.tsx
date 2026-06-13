@@ -7,14 +7,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Package, AlertTriangle, CheckCircle2, ArrowUpCircle, ArrowDownCircle, X, Filter } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Package, AlertTriangle, CheckCircle2, ArrowUpCircle, ArrowDownCircle, X, Filter, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { toast } from '@/hooks/use-toast';
-import { MovementReason } from '@/lib/types';
+import { MovementReason, InventoryAssignment } from '@/lib/types';
 
 const REASON_LABELS: Record<MovementReason, string> = {
   load: 'Carga',
@@ -31,6 +33,9 @@ export default function DeliveryInventoryPage() {
   const [filterTo, setFilterTo]           = useState('');
   const [filterProduct, setFilterProduct] = useState('');
   const [filterReason, setFilterReason]   = useState('');
+
+  const [cancelTarget, setCancelTarget] = useState<InventoryAssignment | null>(null);
+  const [cancelNote, setCancelNote]     = useState('');
 
   const myInventory = inventory.filter(i => i.deliveryPersonId === currentUser?.id);
   const myPendingAssignments = assignments.filter(
@@ -91,6 +96,14 @@ export default function DeliveryInventoryPage() {
   const handleConfirm = (assignmentId: string) => {
     updateAssignmentStatus(assignmentId, 'confirmed');
     toast({ title: 'Recepción confirmada', description: 'El inventario ha sido actualizado.' });
+  };
+
+  const handleConfirmCancel = () => {
+    if (!cancelTarget || !cancelNote.trim()) return;
+    updateAssignmentStatus(cancelTarget.id, 'cancelled', cancelNote.trim());
+    toast({ title: 'Asignación cancelada', description: 'No se sumó nada a tu inventario.' });
+    setCancelTarget(null);
+    setCancelNote('');
   };
 
   return (
@@ -155,13 +168,23 @@ export default function DeliveryInventoryPage() {
                         {a.notes && ` · ${a.notes}`}
                       </p>
                     </div>
-                    <Button
-                      size="sm"
-                      className="gap-1.5 bg-green-600 hover:bg-green-700 h-9"
-                      onClick={() => handleConfirm(a.id)}
-                    >
-                      <CheckCircle2 className="w-4 h-4" /> Confirmar Recepción
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-1.5 h-9 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+                        onClick={() => { setCancelTarget(a); setCancelNote(''); }}
+                      >
+                        <XCircle className="w-4 h-4" /> Cancelar
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="gap-1.5 bg-green-600 hover:bg-green-700 h-9"
+                        onClick={() => handleConfirm(a.id)}
+                      >
+                        <CheckCircle2 className="w-4 h-4" /> Confirmar Recepción
+                      </Button>
+                    </div>
                   </div>
                 );
               })}
@@ -375,6 +398,44 @@ export default function DeliveryInventoryPage() {
           </div>
         )}
       </Card>
+
+      {/* Cancelar asignación pendiente */}
+      <Dialog open={!!cancelTarget} onOpenChange={(open) => { if (!open) { setCancelTarget(null); setCancelNote(''); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Cancelar asignación</DialogTitle>
+            <DialogDescription>
+              {cancelTarget && (
+                <>
+                  {products.find(p => p.id === cancelTarget.productId)?.name ?? cancelTarget.productId}
+                  {' · '}{cancelTarget.quantity} und. No se sumará nada a tu inventario.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 pt-2">
+            <Label className="text-[10px] font-black uppercase text-muted-foreground">Motivo de la cancelación</Label>
+            <Textarea
+              value={cancelNote}
+              onChange={e => setCancelNote(e.target.value)}
+              placeholder="Indica por qué cancelas esta asignación"
+              rows={3}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setCancelTarget(null); setCancelNote(''); }}>
+              Cerrar
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={!cancelNote.trim()}
+              onClick={handleConfirmCancel}
+            >
+              Confirmar Cancelación
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -788,7 +788,7 @@ export default function SalesPage() {
         </div>
       </div>
 
-      <Card className="border-none shadow-md overflow-hidden bg-white/50 backdrop-blur-sm">
+      <Card className="border-none shadow-md overflow-hidden bg-white/50 dark:bg-card backdrop-blur-sm">
         <CardHeader className="bg-white border-b px-8 py-6">
           <CardTitle className="text-xl font-bold flex items-center gap-3">
              <div className="bg-primary/10 p-2 rounded-xl text-primary"><TrendingUp className="w-5 h-5" /></div>
@@ -799,7 +799,7 @@ export default function SalesPage() {
         <CardContent className="p-0">
           <Accordion type="multiple" className="w-full divide-y">
             {salesBySeller.map((group) => (
-              <AccordionItem key={group.seller.id} value={group.seller.id} className="border-none px-8 hover:bg-white/40 transition-colors">
+              <AccordionItem key={group.seller.id} value={group.seller.id} className="border-none px-8 hover:bg-white/40 dark:hover:bg-muted/20 transition-colors">
                 <AccordionTrigger className="hover:no-underline py-6">
                   {(() => {
                     const enRutaCount = group.sales.filter(s => ['assigned','accepted','contacting','scheduled','in_transit'].includes(s.status)).length;
@@ -863,7 +863,7 @@ export default function SalesPage() {
                   <div className="space-y-6 animate-in fade-in duration-300">
                     <div className="overflow-hidden rounded-2xl border bg-white shadow-inner">
                       <Table>
-                        <TableHeader className="bg-muted/50">
+                        <TableHeader className="bg-muted/50 dark:bg-background/60">
                           <TableRow className="hover:bg-transparent border-none">
                             <TableHead className="text-[10px] font-black uppercase pl-6">Fecha</TableHead>
                             <TableHead className="text-[10px] font-black uppercase">Cliente</TableHead>

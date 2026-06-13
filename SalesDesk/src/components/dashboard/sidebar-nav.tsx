@@ -5,10 +5,11 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, ShoppingBag, Users, Package, TrendingUp,
-  UserCircle, LogOut, Receipt, Truck
+  UserCircle, LogOut, Receipt, Truck, Sun, Moon
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { UserRole } from '@/lib/types';
+import { useTheme } from '@/providers/ThemeProvider';
 
 interface SidebarNavProps {
   role: UserRole;
@@ -48,6 +49,7 @@ const linksByRole: Record<UserRole, typeof adminLinks> = {
 export function SidebarNav({ role, onLogout }: SidebarNavProps) {
   const pathname = usePathname();
   const links = linksByRole[role] ?? sellerLinks;
+  const { theme, toggleTheme } = useTheme();
 
   return (
     <div className="flex flex-col h-full bg-sidebar border-r">
@@ -74,7 +76,14 @@ export function SidebarNav({ role, onLogout }: SidebarNavProps) {
           </Link>
         ))}
       </nav>
-      <div className="p-4 border-t">
+      <div className="p-4 border-t space-y-1">
+        <button
+          onClick={toggleTheme}
+          className="flex items-center gap-3 w-full px-4 py-3 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground rounded-lg transition-colors"
+        >
+          {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+          {theme === 'dark' ? 'Modo Claro' : 'Modo Oscuro'}
+        </button>
         <button
           onClick={onLogout}
           className="flex items-center gap-3 w-full px-4 py-3 text-sm font-medium text-destructive hover:bg-destructive/10 rounded-lg transition-colors"

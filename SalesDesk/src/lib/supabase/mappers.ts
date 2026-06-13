@@ -50,6 +50,7 @@ export function mapAssignment(row: any): InventoryAssignment {
     reason: row.reason,
     status: row.status,
     createdAt: row.created_at,
+    updatedAt: row.updated_at ?? undefined,
     notes: row.notes ?? undefined,
   };
 }

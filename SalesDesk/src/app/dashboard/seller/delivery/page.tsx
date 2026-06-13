@@ -461,7 +461,7 @@ export default function SellerDeliveryPage() {
                   const active = personSales.filter(s => !['delivered', 'paid', 'cancelled', 'delivery_failed'].includes(s.status)).length;
                   const failed = personSales.filter(s => s.status === 'delivery_failed').length;
                   return (
-                    <AccordionItem key={person.id} value={person.id} className="border-none px-6 hover:bg-white/40 transition-colors">
+                    <AccordionItem key={person.id} value={person.id} className="border-none px-6 hover:bg-white/40 dark:hover:bg-muted/20 transition-colors">
                       <AccordionTrigger className="hover:no-underline py-5">
                         <div className="flex items-center justify-between w-full pr-4">
                           <div className="flex items-center gap-4">

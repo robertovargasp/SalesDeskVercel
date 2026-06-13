@@ -38,9 +38,9 @@
   .dark {
     --background: 222.2 84% 4.9%;
     --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
+    --card: 222.2 47.4% 11%;
     --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
+    --popover: 222.2 47.4% 11%;
     --popover-foreground: 210 40% 98%;
     --primary: 210 40% 98%;
     --primary-foreground: 222.2 47.4% 11.2%;
@@ -73,4 +73,11 @@
   body {
     @apply bg-background text-foreground font-body;
   }
+}
+
+/* Modo oscuro: superficies blancas hardcodeadas → superficie oscura (evita texto claro sobre blanco) */
+.dark .bg-white,
+.dark .bg-white\/90,
+.dark .bg-white\/95 {
+  background-color: hsl(var(--card));
 }

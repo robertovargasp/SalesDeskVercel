@@ -246,9 +246,9 @@ export default function AdminSettlementsPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-none shadow-2xl bg-primary text-primary-foreground border-b-4 border-b-primary">
+        <Card className="border-none shadow-2xl bg-primary text-primary-foreground dark:bg-primary/20 border-b-4 border-b-primary">
           <CardHeader className="pb-2">
-            <CardTitle className="text-[10px] font-black text-primary-foreground/70 uppercase tracking-widest flex items-center gap-2">
+            <CardTitle className="text-[10px] font-black text-primary-foreground/70 dark:text-white/70 uppercase tracking-widest flex items-center gap-2">
               <Wallet className="w-3.5 h-3.5" /> A RECIBIR
             </CardTitle>
           </CardHeader>
@@ -256,7 +256,7 @@ export default function AdminSettlementsPage() {
             <p className="text-4xl font-black tracking-tighter text-white">
               ${summary.aRecibir.toLocaleString()}
             </p>
-            <p className="text-[9px] text-primary-foreground/60 mt-1 italic">Pendiente de recibir de repartidores</p>
+            <p className="text-[9px] text-primary-foreground/60 dark:text-white/60 mt-1 italic">Pendiente de recibir de repartidores</p>
           </CardContent>
         </Card>
       </div>
@@ -277,7 +277,7 @@ export default function AdminSettlementsPage() {
           </CardHeader>
           <CardContent className="p-0">
             <Table>
-              <TableHeader className="bg-muted/30">
+              <TableHeader className="bg-muted/30 dark:bg-muted/70">
                 <TableRow className="hover:bg-transparent border-none">
                   <TableHead className="text-[10px] font-black uppercase pl-8 h-10">Ciudad</TableHead>
                   <TableHead className="text-[10px] font-black uppercase text-center h-10">Ventas</TableHead>
@@ -409,7 +409,7 @@ export default function AdminSettlementsPage() {
             </CardHeader>
             <CardContent className="p-0">
               <Table>
-                <TableHeader className="bg-muted/30">
+                <TableHeader className="bg-muted/30 dark:bg-muted/70">
                   <TableRow>
                     <TableHead className="text-[10px]">VENDEDOR / SEMANA</TableHead>
                     <TableHead className="text-[10px]">DEPÓSITO ($)</TableHead>

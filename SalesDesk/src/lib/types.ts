@@ -46,7 +46,7 @@ export interface InventoryItem {
   reservedQuantity: number;
 }
 
-export type AssignmentStatus = 'pending' | 'confirmed' | 'disputed';
+export type AssignmentStatus = 'pending' | 'confirmed' | 'disputed' | 'cancelled';
 export type MovementType = 'addition' | 'subtraction';
 export type MovementReason = 'load' | 'sale' | 'adjustment' | 'return' | 'correction';
 
@@ -59,6 +59,7 @@ export interface InventoryAssignment {
   reason: MovementReason;
   status: AssignmentStatus;
   createdAt: string;
+  updatedAt?: string;
   notes?: string;
 }
 

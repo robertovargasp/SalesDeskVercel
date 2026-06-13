@@ -395,7 +395,7 @@ export default function AdminDeliveryPage() {
                   <AccordionItem
                     key={person.id}
                     value={person.id}
-                    className="border-none px-6 hover:bg-white/40 transition-colors"
+                    className="border-none px-6 hover:bg-white/40 dark:hover:bg-muted/20 transition-colors"
                   >
                     <AccordionTrigger className="hover:no-underline py-5">
                       <div className="flex flex-col gap-3 w-full pr-4">
@@ -446,7 +446,7 @@ export default function AdminDeliveryPage() {
                           <p className="text-xs text-muted-foreground italic px-1">Sin pedidos en esta sección</p>
                         ) : (
                           <Table>
-                            <TableHeader className="bg-orange-50/60">
+                            <TableHeader className="bg-orange-50/60 dark:bg-background/60 dark:[&_th]:text-foreground">
                               <TableRow>
                                 <TableHead className="text-[10px] font-black uppercase pl-4">Cliente</TableHead>
                                 <TableHead className="text-[10px] font-black uppercase">Producto(s)</TableHead>
@@ -496,7 +496,7 @@ export default function AdminDeliveryPage() {
                           <p className="text-xs text-muted-foreground italic px-1">Sin pedidos en esta sección</p>
                         ) : (
                           <Table>
-                            <TableHeader className="bg-amber-50/60">
+                            <TableHeader className="bg-amber-50/60 dark:bg-background/60 dark:[&_th]:text-foreground">
                               <TableRow>
                                 <TableHead className="text-[10px] font-black uppercase pl-4">Cliente</TableHead>
                                 <TableHead className="text-[10px] font-black uppercase">Producto(s)</TableHead>
@@ -546,7 +546,7 @@ export default function AdminDeliveryPage() {
                           <p className="text-xs text-muted-foreground italic px-1">Sin pedidos en esta sección</p>
                         ) : (
                           <Table>
-                            <TableHeader className="bg-primary/5">
+                            <TableHeader className="bg-primary/5 dark:bg-background/60 dark:[&_th]:text-foreground">
                               <TableRow>
                                 <TableHead className="text-[10px] font-black uppercase pl-4">Cliente</TableHead>
                                 <TableHead className="text-[10px] font-black uppercase">Producto(s)</TableHead>

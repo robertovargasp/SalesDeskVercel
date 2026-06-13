@@ -1,6 +1,7 @@
 import { createClient as createSupabaseAdminClient } from '@supabase/supabase-js';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { checkRateLimit } from '@/lib/rate-limit';
 
 export async function POST(request: Request) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -9,6 +10,20 @@ export async function POST(request: Request) {
 
   if (!supabaseUrl || !serviceKey || !anonKey) {
     return Response.json({ error: 'Configuración del servidor incompleta' }, { status: 503 });
+  }
+
+  // Anti-CSRF: rechazar si el Origin no coincide con el host del request
+  const origin = request.headers.get('origin');
+  const host = request.headers.get('host');
+  if (origin && new URL(origin).host !== host) {
+    return Response.json({ error: 'Origen no permitido' }, { status: 403 });
+  }
+
+  // Rate limiting por IP (no-op si Upstash no está configurado)
+  const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'anonymous';
+  const { success } = await checkRateLimit(ip);
+  if (!success) {
+    return Response.json({ error: 'Demasiadas solicitudes. Intenta más tarde.' }, { status: 429 });
   }
 
   // Verificar que el request viene de un admin autenticado (server-side)
