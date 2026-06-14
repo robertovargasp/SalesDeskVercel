@@ -97,18 +97,20 @@ export default function SellerSettlementsPage() {
   }, [period]);
 
   const periodSales = useMemo(() => {
+    // Reporte: solo ventas entregadas / confirmadas / pagadas
+    const reportSales = mySales.filter(s => ['delivered', 'delivery_confirmed', 'paid'].includes(s.status));
     if (period === 'custom') {
       const from = customFrom ? new Date(customFrom + 'T00:00:00') : null;
       const to   = customTo   ? new Date(customTo   + 'T23:59:59') : null;
-      return mySales.filter(s => {
+      return reportSales.filter(s => {
         const d = new Date(s.createdAt);
         if (from && d < from) return false;
         if (to   && d > to)   return false;
         return true;
       });
     }
-    if (!periodStart) return mySales;
-    return mySales.filter(s => new Date(s.createdAt) >= periodStart);
+    if (!periodStart) return reportSales;
+    return reportSales.filter(s => new Date(s.createdAt) >= periodStart);
   }, [mySales, period, periodStart, customFrom, customTo]);
 
   const deliveryPersonsInPeriod = useMemo(() => {

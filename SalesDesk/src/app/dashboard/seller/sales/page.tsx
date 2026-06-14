@@ -396,51 +396,32 @@ export default function SellerSalesPage() {
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-bold text-muted-foreground">Seguimiento del pedido</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-12 py-6">
-                <div className="relative px-4">
-                  <div className="absolute top-1/2 left-0 w-full h-0.5 bg-muted -translate-y-1/2 z-0" />
+              <CardContent className="py-6 px-8">
+                <div className="relative">
+                  <div className="absolute top-6 left-0 w-full h-0.5 bg-muted z-0" />
+                  <div className="absolute top-6 left-0 h-0.5 bg-primary z-0 transition-all duration-700"
+                    style={{ width: `${(Math.max(0, currentStatusIdx) / (STEPS.length - 1)) * 100}%` }} />
                   <div className="flex justify-between relative z-10">
                     {STEPS.map((step, idx) => {
-                      const Icon = step.icon;
                       const isPast = idx <= currentStatusIdx || selectedSale.status === 'paid';
-                      const isCurrent = idx === currentStatusIdx && selectedSale.status !== 'paid';
-
                       return (
-                        <div key={step.id} className="flex flex-col items-center gap-2 group">
+                        <div key={step.id} className="flex flex-col items-center gap-2 w-1/5">
                           <div className={cn(
-                            "w-12 h-12 rounded-full flex items-center justify-center border-4 transition-all duration-500",
+                            "w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center border-4 transition-all duration-500",
                             isPast ? "bg-primary border-primary text-primary-foreground shadow-lg" : "bg-white border-muted text-muted-foreground"
                           )}>
-                            <Icon className="w-5 h-5" />
+                            {isPast
+                              ? <CheckCircle2 className="w-5 h-5" />
+                              : <span className="text-sm font-black">{idx + 1}</span>
+                            }
                           </div>
                           <span className={cn(
-                            "text-[10px] font-bold uppercase tracking-tight",
+                            "text-[9px] font-bold uppercase tracking-tight text-center",
                             isPast ? "text-primary" : "text-muted-foreground"
                           )}>{step.label}</span>
                         </div>
                       );
                     })}
-                  </div>
-                </div>
-
-                <div className="space-y-6 px-4">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold text-muted-foreground">Situación actual</span>
-                    <Badge variant="secondary" className="bg-primary/10 text-primary border-none px-3">
-                      {getStatusLabel(selectedSale.status)}
-                    </Badge>
-                  </div>
-                  <div className="relative h-2 bg-muted rounded-full overflow-visible">
-                    <div 
-                      className="absolute top-0 left-0 h-full bg-primary rounded-full transition-all duration-1000 ease-out"
-                      style={{ width: `${progress}%` }}
-                    />
-                    <div 
-                      className="absolute top-1/2 -translate-y-1/2 bg-primary w-8 h-8 rounded-xl shadow-lg flex items-center justify-center text-primary-foreground transition-all duration-1000 ease-out"
-                      style={{ left: `calc(${progress}% - 16px)` }}
-                    >
-                      <Package className="w-4 h-4" />
-                    </div>
                   </div>
                 </div>
               </CardContent>

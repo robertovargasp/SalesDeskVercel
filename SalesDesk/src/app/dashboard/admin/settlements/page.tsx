@@ -74,7 +74,7 @@ export default function AdminSettlementsPage() {
       .filter(s => !s.settlementId || !confirmedSettlementIds.has(s.settlementId))
       .reduce((acc, s) => acc + s.totalDeposito, 0);
     return { totalVenta, totalComision, ventaNeta: totalVenta - totalComision, aRecibir };
-  }, [filteredSales]);
+  }, [filteredSales, settlements]);
 
   // Desglose por ciudad desde ventas filtradas
   const citySummary = useMemo(() => {
