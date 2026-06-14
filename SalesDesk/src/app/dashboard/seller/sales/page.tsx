@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { applyDateFilter, DateRangeFilter, DATE_FILTER_LABELS } from '@/lib/date-filters';
+import { applyDateFilter, DateRangeFilter, DATE_FILTER_LABELS, countsForTotals } from '@/lib/date-filters';
 import {
   CheckCircle2,
   Truck,
@@ -178,7 +178,7 @@ export default function SellerSalesPage() {
 
   // Resumen por ciudad — agrupa las ventas activas (excluye canceladas/fallidas)
   const citySummary = useMemo(() => {
-    const active = mySales.filter(s => !['cancelled', 'delivery_failed'].includes(s.status));
+    const active = mySales.filter(s => countsForTotals(s.status));
     const map: Record<string, number> = {};
     active.forEach(s => {
       const city = s.city?.trim() || 'Sin ciudad';
@@ -376,55 +376,14 @@ export default function SellerSalesPage() {
         </div>
 
         {isPendingConfirmation && (
-          <Card className="border-none shadow-2xl bg-primary text-primary-foreground rounded-3xl overflow-hidden animate-in zoom-in-95 duration-500">
-            <CardContent className="p-8">
-              <div className="flex flex-col md:flex-row items-center justify-between gap-8">
-                <div className="flex items-center gap-6">
-                  <div className="bg-white/20 p-4 rounded-2xl">
-                    <Handshake className="w-10 h-10" />
-                  </div>
-                  <div className="space-y-1">
-                    <h2 className="text-2xl font-black">¿Deseas realizar esta venta?</h2>
-                    <p className="text-primary-foreground/70 text-sm">Confirma para empezar el proceso de contacto y entrega.</p>
-                  </div>
-                </div>
-                <div className="flex gap-4 w-full md:w-auto">
-                  <Button 
-                    className="flex-1 md:flex-none h-14 px-10 bg-white text-primary hover:bg-white/90 font-black rounded-2xl shadow-xl"
-                    onClick={() => updateSaleStatus(selectedSale.id, 'accepted')}
-                  >
-                    ACEPTAR VENTA
-                  </Button>
-                  <Dialog open={isRejectDialogOpen} onOpenChange={setIsRejectDialogOpen}>
-                    <DialogTrigger asChild>
-                      <Button 
-                        variant="ghost" 
-                        className="flex-1 md:flex-none h-14 px-10 text-white hover:bg-white/10 font-bold border-2 border-white/20 rounded-2xl"
-                      >
-                        RECHAZAR
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>Rechazar Asignación</DialogTitle>
-                        <DialogDescription>Indica brevemente por qué no puedes tomar esta venta.</DialogDescription>
-                      </DialogHeader>
-                      <div className="space-y-4 py-4">
-                        <div className="space-y-2">
-                          <Label className="text-xs font-bold uppercase">Motivo del Rechazo</Label>
-                          <Input 
-                            placeholder="Ej: Fuera de mi zona, cliente no contesta..." 
-                            value={rejectionNote}
-                            onChange={e => setRejectionNote(e.target.value)}
-                          />
-                        </div>
-                      </div>
-                      <DialogFooter>
-                        <Button variant="destructive" className="w-full h-12" onClick={confirmRejection}>Confirmar Rechazo</Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-                </div>
+          <Card className="border-none shadow-2xl bg-amber-500 text-white rounded-3xl overflow-hidden animate-in zoom-in-95 duration-500">
+            <CardContent className="p-6 md:p-8 flex items-center gap-6">
+              <div className="bg-white/20 p-4 rounded-2xl shrink-0">
+                <Handshake className="w-10 h-10" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-black tracking-tight">{getSaleStatusLabel(selectedSale).toUpperCase()}</h2>
+                <p className="text-white/80 text-sm mt-1">Venta asignada — en espera de aceptación.</p>
               </div>
             </CardContent>
           </Card>
@@ -1007,7 +966,7 @@ export default function SellerSalesPage() {
             </CardHeader>
             <CardContent>
               <p className="text-4xl font-black text-primary-foreground tracking-tighter">
-                ${filteredSales.filter(s => ['delivered','paid','cancelled'].includes(s.status)).reduce((acc, s) => acc + s.totalVenta, 0).toLocaleString()}
+                ${filteredSales.filter(s => ['delivered','paid'].includes(s.status)).reduce((acc, s) => acc + s.totalVenta, 0).toLocaleString()}
               </p>
               <p className="text-[10px] text-primary-foreground/60 mt-2 font-medium">Valor de productos entregados</p>
             </CardContent>
@@ -1094,7 +1053,7 @@ export default function SellerSalesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {mySales.filter(s => !['cancelled', 'delivery_failed'].includes(s.status))
+                  {mySales.filter(s => countsForTotals(s.status))
                     .slice().reverse().slice(0, 8)
                     .map(sale => (
                     <TableRow key={sale.id} className="h-14">

@@ -5,7 +5,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 // NEXT_PUBLIC_SUPABASE_URL=https://tu-proyecto.supabase.co
 // NEXT_PUBLIC_SUPABASE_ANON_KEY=tu-anon-key
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(

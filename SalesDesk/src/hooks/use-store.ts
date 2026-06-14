@@ -83,24 +83,28 @@ export function useStore() {
     // ── Funciones de fetch ──────────────────────────────────────────────────
 
     const fetchProducts = () =>
-      supabase.from('products').select('*').then(({ data }) =>
-        setProducts(data?.map(mapProduct) ?? [])
-      );
+      supabase.from('products').select('*').eq('is_active', true).then(({ data, error }) => {
+        if (error) console.error('[fetchProducts]', error.message);
+        setProducts(data?.map(mapProduct) ?? []);
+      });
 
     const fetchUsers = () =>
-      supabase.from('profiles').select('*').then(({ data }) =>
-        setUsers(data?.map(mapUser) ?? [])
-      );
+      supabase.from('profiles').select('*').eq('is_active', true).then(({ data, error }) => {
+        if (error) console.error('[fetchUsers]', error.message);
+        setUsers(data?.map(mapUser) ?? []);
+      });
 
     const fetchInventory = () =>
-      supabase.from('inventory_items').select('*').then(({ data }) =>
-        setInventory(data?.map(mapInventoryItem) ?? [])
-      );
+      supabase.from('inventory_items').select('*').then(({ data, error }) => {
+        if (error) console.error('[fetchInventory]', error.message);
+        setInventory(data?.map(mapInventoryItem) ?? []);
+      });
 
     const fetchAssignments = () =>
-      supabase.from('inventory_assignments').select('*').order('created_at', { ascending: false }).then(({ data }) =>
-        setAssignments(data?.map(mapAssignment) ?? [])
-      );
+      supabase.from('inventory_assignments').select('*').order('created_at', { ascending: false }).then(({ data, error }) => {
+        if (error) console.error('[fetchAssignments]', error.message);
+        setAssignments(data?.map(mapAssignment) ?? []);
+      });
 
     const fetchSales = () => {
       const q = supabase.from('orders').select(`
@@ -112,9 +116,10 @@ export function useStore() {
         role === 'delivery' ? q.eq('delivery_person_id', uid) :
         role === 'seller'   ? q.eq('seller_id', uid) :
         q;
-      return filtered.then(({ data }) =>
-        setSales(data?.map(mapSale) ?? [])
-      );
+      return filtered.then(({ data, error }) => {
+        if (error) console.error('[fetchSales]', error.message);
+        setSales(data?.map(mapSale) ?? []);
+      });
     };
 
     const fetchSettlements = async () => {
@@ -161,7 +166,8 @@ export function useStore() {
     const fetchKardex = () => {
       const q = supabase.from('kardex_entries').select('*').order('created_at', { ascending: false });
       const filtered = role === 'delivery' ? q.eq('delivery_person_id', uid).range(0, 99) : q.range(0, 99);
-      return filtered.then(({ data }) => {
+      return filtered.then(({ data, error }) => {
+        if (error) console.error('[fetchKardex]', error.message);
         setKardex(data?.map(mapKardex) ?? []);
         setKardexPage(0);
         setKardexHasMore((data?.length ?? 0) === 100);
@@ -169,7 +175,8 @@ export function useStore() {
     };
 
     const fetchConfig = () =>
-      supabase.from('app_config').select('*').eq('key', 'payment_info').single().then(({ data }) => {
+      supabase.from('app_config').select('*').eq('key', 'payment_info').single().then(({ data, error }) => {
+        if (error) console.error('[fetchConfig]', error.message);
         if (data?.value) setPaymentInfo(data.value);
       });
 
@@ -358,13 +365,14 @@ export function useStore() {
     }
 
     // 3. INSERT evento inicial
-    supabase.from('order_events').insert({
+    const { error: eventErr } = await supabase.from('order_events').insert({
       order_id:  saleId,
       type:      'creation',
       user_id:   user?.id ?? null,
       user_name: currentUser?.name ?? 'Sistema',
       note:      'Venta registrada',
     });
+    if (eventErr) console.error('[registerMultiSale] INSERT order_events:', eventErr.message);
 
     // 4. Reservar stock del repartidor
     if (deliveryPersonId) {
@@ -754,7 +762,6 @@ export function useStore() {
     }
 
     const { error, count } = await supabase.from('orders').delete({ count: 'exact' }).eq('id', saleId);
-    console.log('[deleteSale]', { error: error?.message ?? null, count, status: sale.status, settlementId: sale.settlementId });
     if (error || !count) {
       toast({ variant: 'destructive', title: 'Error al eliminar', description: error?.message ?? 'Sin permiso para eliminar esta venta.' });
       return;
@@ -850,7 +857,7 @@ export function useStore() {
   };
 
   const refetchUsers = async () => {
-    const { data } = await supabase.from('profiles').select('*');
+    const { data } = await supabase.from('profiles').select('*').eq('is_active', true);
     if (data) setUsers(data.map(mapUser));
   };
 
@@ -962,7 +969,7 @@ export function useStore() {
 
   // ─── Refetch de productos (reutilizable desde mutations + realtime) ─────────
   const refetchProducts = async () => {
-    const { data, error } = await supabase.from('products').select('*');
+    const { data } = await supabase.from('products').select('*').eq('is_active', true);
     if (data) setProducts(data.map(mapProduct));
   };
 
@@ -1004,7 +1011,10 @@ export function useStore() {
   };
 
   const deleteProduct = async (id: string) => {
-    const { error } = await supabase.from('products').delete().eq('id', id);
+    // Soft-delete: conserva historial (ventas/kardex) y oculta el producto del catálogo
+    const { error } = await supabase.from('products')
+      .update({ is_active: false, deleted_at: new Date().toISOString() })
+      .eq('id', id);
     if (error) {
       toast({ variant: 'destructive', title: 'Error al eliminar producto', description: error.message });
       return;

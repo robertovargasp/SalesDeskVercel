@@ -1,5 +1,13 @@
 export type DateRangeFilter = 'today' | 'week' | 'month' | 'custom';
 
+// Estados que NUNCA deben sumarse en totales, métricas ni reportes.
+// Solo aparecen en listados/historial con su badge de estado.
+export const EXCLUDED_TOTAL_STATUSES = ['cancelled', 'delivery_failed', 'pending_return'] as const;
+
+/** true si la venta cuenta para totales/métricas (no está cancelada/fallida/en devolución). */
+export const countsForTotals = (status: string) =>
+  !(EXCLUDED_TOTAL_STATUSES as readonly string[]).includes(status);
+
 export function getDateRange(
   filter: DateRangeFilter,
   customStart?: Date,
@@ -15,8 +23,11 @@ export function getDateRange(
   }
 
   if (filter === 'week') {
+    // Lunes a domingo de la semana actual
+    const day = today.getDay();                 // 0=domingo … 6=sábado
+    const diffToMonday = day === 0 ? -6 : 1 - day;
     const start = new Date(today);
-    start.setDate(today.getDate() - today.getDay());
+    start.setDate(today.getDate() + diffToMonday);
     const end = new Date(start);
     end.setDate(start.getDate() + 6);
     end.setHours(23, 59, 59, 999);

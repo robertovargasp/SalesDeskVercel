@@ -48,7 +48,7 @@ const defaultForm = {
 };
 
 export default function UsersPage() {
-  const { users, addUser, updateUser, deleteUser } = useStore();
+  const { users, sales, addUser, updateUser, deleteUser } = useStore();
   const [isOpen, setIsOpen] = useState(false);
   const [filterCity, setFilterCity] = useState('');
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
@@ -169,7 +169,12 @@ export default function UsersPage() {
     setEditingUser(null);
   };
 
-  const UserCard = ({ u }: { u: UserProfile }) => (
+  const UserCard = ({ u }: { u: UserProfile }) => {
+    const activeSalesCount = sales.filter(s =>
+      (s.sellerId === u.id || s.deliveryPersonId === u.id) &&
+      !['paid', 'cancelled', 'delivery_failed'].includes(s.status)
+    ).length;
+    return (
     <AccordionItem key={u.id} value={u.id} className="border rounded-xl px-4 overflow-hidden bg-card hover:bg-muted/10 transition-colors">
       <AccordionTrigger className="hover:no-underline py-4">
         <div className="flex items-center gap-3">
@@ -228,7 +233,14 @@ export default function UsersPage() {
               <AlertDialogContent>
                 <AlertDialogHeader>
                   <AlertDialogTitle>¿Confirmar eliminación?</AlertDialogTitle>
-                  <AlertDialogDescription>Eliminará a <strong>{u.name}</strong> del sistema.</AlertDialogDescription>
+                  <AlertDialogDescription>
+                    Eliminará a <strong>{u.name}</strong> y <strong>todos sus registros relacionados</strong> (ventas, inventario, kardex, liquidaciones). Esta acción no se puede deshacer.
+                    {activeSalesCount > 0 && (
+                      <span className="block mt-2 font-bold text-destructive">
+                        ⚠️ Tiene {activeSalesCount} venta{activeSalesCount > 1 ? 's' : ''} activa{activeSalesCount > 1 ? 's' : ''} (no finalizada{activeSalesCount > 1 ? 's' : ''}) que también se eliminará{activeSalesCount > 1 ? 'n' : ''}.
+                      </span>
+                    )}
+                  </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancelar</AlertDialogCancel>
@@ -240,7 +252,8 @@ export default function UsersPage() {
         </div>
       </AccordionContent>
     </AccordionItem>
-  );
+    );
+  };
 
   return (
     <div className="space-y-6">

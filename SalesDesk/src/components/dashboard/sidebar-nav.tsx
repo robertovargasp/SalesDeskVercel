@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, ShoppingBag, Users, Package, TrendingUp,
-  UserCircle, LogOut, Receipt, Truck, Sun, Moon
+  LogOut, Receipt, Truck, Sun, Moon
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { UserRole } from '@/lib/types';
@@ -25,7 +25,6 @@ const adminLinks = [
   { label: 'Ventas', href: '/dashboard/admin/sales', icon: TrendingUp },
   { label: 'Paquetería', href: '/dashboard/admin/delivery', icon: Truck },
   { label: 'Liquidaciones', href: '/dashboard/admin/settlements', icon: Receipt },
-  { label: 'AI Insights', href: '/dashboard/admin/insights', icon: UserCircle },
 ];
 
 const sellerLinks = [

@@ -699,7 +699,7 @@ export default function SalesPage() {
           </CardHeader>
           <CardContent>
             <p className="text-4xl font-black text-primary-foreground tracking-tighter">
-              ${salesInPeriod.filter(s => ['delivered','paid','cancelled'].includes(s.status)).reduce((acc, s) => acc + s.totalVenta, 0).toLocaleString()}
+              ${salesInPeriod.filter(s => ['delivered','paid'].includes(s.status)).reduce((acc, s) => acc + s.totalVenta, 0).toLocaleString()}
             </p>
             <p className="text-[10px] text-primary-foreground/60 mt-2 font-medium">Valor de productos entregados</p>
           </CardContent>

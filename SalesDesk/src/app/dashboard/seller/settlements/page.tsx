@@ -15,6 +15,7 @@ import {
 import { startOfDay, startOfWeek, startOfMonth, format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { SaleStatus } from '@/lib/types';
+import { countsForTotals } from '@/lib/date-filters';
 
 type Period = 'today' | 'week' | 'month' | 'custom';
 type SortOrder = 'recent' | 'oldest' | 'highest' | 'lowest';
@@ -140,16 +141,21 @@ export default function SellerSettlementsPage() {
     return arr;
   }, [filteredSales, sortOrder]);
 
-  const metrics = useMemo(() => ({
-    totalVentas:   filteredSales.length,
-    totalVenta:    filteredSales.reduce((s, v) => s + v.totalVenta, 0),
-    totalComision: filteredSales.reduce((s, v) => s + v.totalComision, 0),
-    entregadas:    filteredSales.filter(s => ['delivered', 'delivery_confirmed', 'paid'].includes(s.status)).length,
-  }), [filteredSales]);
+  const metrics = useMemo(() => {
+    // Excluir canceladas/fallidas/en devolución de todos los montos y conteos
+    const valid = filteredSales.filter(s => countsForTotals(s.status));
+    return {
+      totalVentas:   valid.length,
+      totalVenta:    valid.reduce((s, v) => s + v.totalVenta, 0),
+      totalComision: valid.reduce((s, v) => s + v.totalComision, 0),
+      entregadas:    filteredSales.filter(s => ['delivered', 'delivery_confirmed', 'paid'].includes(s.status)).length,
+    };
+  }, [filteredSales]);
 
   const citySummary = useMemo(() => {
     const map = new Map<string, { city: string; delivery: string; count: number; totalVenta: number; totalComision: number }>();
     for (const s of filteredSales) {
+      if (!countsForTotals(s.status)) continue;
       const city = s.city?.trim() || 'Sin ciudad';
       const deliveryId = s.deliveryPersonId ?? '';
       const deliveryName = deliveryId

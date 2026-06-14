@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Plus, Pencil, Trash2, Package, DollarSign, Wallet, AlertTriangle } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { toast } from '@/hooks/use-toast';
 
@@ -192,9 +193,23 @@ export default function ProductsPage() {
                       }}>
                         <Pencil className="w-4 h-4" /> Editar
                       </Button>
-                      <Button variant="ghost" size="sm" className="flex-1 md:flex-none gap-2 text-destructive hover:bg-destructive/10" onClick={() => deleteProduct(p.id)}>
-                        <Trash2 className="w-4 h-4" /> Eliminar
-                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="ghost" size="sm" className="flex-1 md:flex-none gap-2 text-destructive hover:bg-destructive/10">
+                            <Trash2 className="w-4 h-4" /> Eliminar
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>¿Confirmar eliminación?</AlertDialogTitle>
+                            <AlertDialogDescription>Eliminará el producto <strong>{p.name}</strong> del catálogo.</AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => deleteProduct(p.id)} className="bg-destructive text-destructive-foreground">Confirmar</AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
                     </div>
                   </div>
                 </AccordionContent>

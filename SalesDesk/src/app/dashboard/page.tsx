@@ -15,7 +15,7 @@ import {
   TrendingUp, AlertTriangle, CalendarDays, Users
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { applyDateFilter, DATE_FILTER_LABELS, DateRangeFilter } from '@/lib/date-filters';
+import { applyDateFilter, DATE_FILTER_LABELS, DateRangeFilter, countsForTotals } from '@/lib/date-filters';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import {
@@ -63,10 +63,10 @@ export default function DashboardPage() {
       .filter(s => s.status === 'delivery_confirmed')
       .reduce((acc, s) => acc + s.totalDeposito, 0);
     const totalVentas = filteredSales
-      .filter(s => !['cancelled', 'delivery_failed'].includes(s.status))
+      .filter(s => countsForTotals(s.status))
       .reduce((acc, s) => acc + s.totalVenta, 0);
     const totalComisiones = filteredSales
-      .filter(s => !['cancelled', 'delivery_failed'].includes(s.status))
+      .filter(s => countsForTotals(s.status))
       .reduce((acc, s) => acc + s.totalComision, 0);
     return { enRuta, entregadas, pagadas, fallidas, dineroManos, totalVentas, totalComisiones };
   }, [filteredSales]);
@@ -82,7 +82,7 @@ export default function DashboardPage() {
   const cityChartData = useMemo(() => {
     const map: Record<string, number> = {};
     baseSales
-      .filter(s => !['cancelled', 'delivery_failed'].includes(s.status))
+      .filter(s => countsForTotals(s.status))
       .forEach(s => {
         map[s.city] = (map[s.city] || 0) + s.totalVenta;
       });
@@ -97,9 +97,9 @@ export default function DashboardPage() {
     const sellers = users.filter(u => u.role === 'seller');
     return sellers.map(seller => {
       const sellerSales = baseSales.filter(s => s.sellerId === seller.id);
-      const activas = sellerSales.filter(s => !['paid', 'cancelled', 'delivery_failed'].includes(s.status)).length;
-      const totalVenta = sellerSales.filter(s => !['cancelled', 'delivery_failed'].includes(s.status)).reduce((a, s) => a + s.totalVenta, 0);
-      const comisiones = sellerSales.filter(s => !['cancelled', 'delivery_failed'].includes(s.status)).reduce((a, s) => a + s.totalComision, 0);
+      const activas = sellerSales.filter(s => countsForTotals(s.status) && s.status !== 'paid').length;
+      const totalVenta = sellerSales.filter(s => countsForTotals(s.status)).reduce((a, s) => a + s.totalVenta, 0);
+      const comisiones = sellerSales.filter(s => countsForTotals(s.status)).reduce((a, s) => a + s.totalComision, 0);
       const pendiente = sellerSales.filter(s => s.status === 'delivered').reduce((a, s) => a + s.totalDeposito, 0);
       const fallidas = sellerSales.filter(s => s.status === 'delivery_failed' || s.status === 'cancelled').length;
       return { seller, activas, totalVenta, comisiones, pendiente, fallidas };

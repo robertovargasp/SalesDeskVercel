@@ -162,8 +162,8 @@ export default function DeliveryInventoryPage() {
                 return (
                   <div key={a.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 md:px-6 py-4">
                     <div className="space-y-0.5">
-                      <p className="text-sm font-black">{product?.name ?? a.productId}</p>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-sm font-black dark:text-orange-900">{product?.name ?? a.productId}</p>
+                      <p className="text-xs text-muted-foreground dark:text-orange-800">
                         {a.quantity} und · {format(new Date(a.createdAt), 'dd/MM/yy', { locale: es })}
                         {a.notes && ` · ${a.notes}`}
                       </p>

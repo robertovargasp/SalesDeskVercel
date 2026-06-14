@@ -1,8 +1,11 @@
 import type { NextConfig } from 'next';
 
+const isDev = process.env.NODE_ENV === 'development';
+
 const contentSecurityPolicy = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
+  // 'unsafe-eval' solo en desarrollo (Turbopack / React Refresh lo requieren)
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com",
   "img-src 'self' data: blob: https://*.supabase.co https://placehold.co https://images.unsplash.com https://picsum.photos",
@@ -29,9 +32,6 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
-  },
-  eslint: {
-    ignoreDuringBuilds: true,
   },
   async headers() {
     return [
