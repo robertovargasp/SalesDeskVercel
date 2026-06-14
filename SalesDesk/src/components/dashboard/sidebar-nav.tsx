@@ -14,6 +14,7 @@ import { useTheme } from '@/providers/ThemeProvider';
 interface SidebarNavProps {
   role: UserRole;
   onLogout: () => void;
+  onNavigate?: () => void;
 }
 
 const adminLinks = [
@@ -46,7 +47,7 @@ const linksByRole: Record<UserRole, typeof adminLinks> = {
   delivery: deliveryLinks,
 };
 
-export function SidebarNav({ role, onLogout }: SidebarNavProps) {
+export function SidebarNav({ role, onLogout, onNavigate }: SidebarNavProps) {
   const pathname = usePathname();
   const links = linksByRole[role] ?? sellerLinks;
   const { theme, toggleTheme } = useTheme();
@@ -64,6 +65,7 @@ export function SidebarNav({ role, onLogout }: SidebarNavProps) {
           <Link
             key={link.href}
             href={link.href}
+            onClick={onNavigate}
             className={cn(
               "flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg transition-colors",
               pathname === link.href

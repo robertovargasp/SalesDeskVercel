@@ -99,7 +99,7 @@ export default function ProductsPage() {
                   required 
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Precio ($)</Label>
                   <Input
@@ -119,7 +119,7 @@ export default function ProductsPage() {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Stock Mínimo (alerta)</Label>
                   <Input

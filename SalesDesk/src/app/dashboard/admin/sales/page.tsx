@@ -20,6 +20,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { toast } from '@/hooks/use-toast';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 import { SaleStatus } from '@/lib/types';
 import { applyDateFilter, DATE_FILTER_LABELS, DateRangeFilter } from '@/lib/date-filters';
@@ -66,6 +67,7 @@ const ADMIN_STATUS_GROUPS: Record<string, string[]> = {
 
 export default function SalesPage() {
   const { currentUser, products, users, sales, inventory, registerMultiSale, updateSaleStatus, deleteSale, assignDeliveryPerson } = useStore();
+  const isMobile = useIsMobile();
 
   // Calcula el tiempo restante de las 48h desde que un pedido falló
   const get48hCountdown = (failedAt?: string): { expired: boolean; label: string } => {
@@ -464,8 +466,8 @@ export default function SalesPage() {
               </DialogHeader>
             </div>
 
-            <div className="p-8 space-y-8">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-muted/30 p-8 rounded-3xl border border-dashed border-primary/20">
+            <div className="p-4 md:p-8 space-y-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-muted/30 p-4 md:p-8 rounded-3xl border border-dashed border-primary/20">
                 <div className="space-y-2">
                   <Label className="text-xs font-bold uppercase text-muted-foreground flex items-center gap-1">Vendedor Responsable <span className="text-destructive">*</span></Label>
                   {isSeller ? (
@@ -550,8 +552,8 @@ export default function SalesPage() {
 
               <div className="space-y-4">
                 <Label className="text-xs font-bold uppercase text-muted-foreground tracking-widest">Mercancía Entregada</Label>
-                <div className="rounded-2xl border bg-card shadow-sm overflow-hidden">
-                  <Table>
+                <div className="rounded-2xl border bg-card shadow-sm overflow-x-auto">
+                  <Table className="min-w-[480px]">
                     <TableHeader className="bg-muted/50">
                       <TableRow className="hover:bg-transparent">
                         <TableHead className="text-[10px] h-10 uppercase font-black">Producto</TableHead>
@@ -862,6 +864,137 @@ export default function SalesPage() {
                 <AccordionContent className="pb-8">
                   <div className="space-y-6 animate-in fade-in duration-300">
                     <div className="overflow-hidden rounded-2xl border bg-white shadow-inner">
+                      {isMobile ? (
+                        <div className="divide-y">
+                          {group.sales.slice().reverse().map((sale) => {
+                            const isFailed = ['delivery_failed', 'pending_return'].includes(sale.status);
+                            return (
+                              <div key={sale.id} className={cn(
+                                "p-4 space-y-3",
+                                sale.status === 'pending_return' && "bg-red-50/60 border-l-4 border-l-red-500"
+                              )}>
+                                <div className="flex justify-between items-start gap-2">
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-black uppercase tracking-tight truncate">{sale.status === 'assigned' ? '**********' : (sale.customerName || 'Cliente')}</p>
+                                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                                      <MapPin className="w-3 h-3" /> {sale.city} · {new Date(sale.createdAt).toLocaleDateString()}
+                                    </div>
+                                  </div>
+                                  {SALE_STATUS_BADGE_CONFIG[sale.status] && (
+                                    <Badge className={cn('text-[9px] font-black uppercase border-none shrink-0', SALE_STATUS_BADGE_CONFIG[sale.status].color)}>
+                                      {SALE_STATUS_BADGE_CONFIG[sale.status].label}
+                                    </Badge>
+                                  )}
+                                </div>
+
+                                <div className="bg-muted/30 p-2.5 rounded-xl border border-muted-foreground/10 space-y-1">
+                                  <div className="flex justify-between items-baseline">
+                                    <span className="text-[9px] text-muted-foreground italic font-medium">Cobrado:</span>
+                                    <span className="text-[11px] font-bold">${sale.totalVenta.toLocaleString()}</span>
+                                  </div>
+                                  <div className="flex justify-between items-baseline border-t border-dashed pt-1">
+                                    <span className="text-[9px] text-primary font-black uppercase tracking-tighter">A LIQUIDAR:</span>
+                                    <span className="text-sm font-black text-primary tracking-tighter">${sale.totalDeposito.toLocaleString()}</span>
+                                  </div>
+                                </div>
+
+                                <div className="overflow-x-auto pb-1"><StatusTimeline status={sale.status} sale={sale} /></div>
+                                {sale.deliveryDate && (
+                                  <p className="text-[9px] font-bold text-orange-600 uppercase flex items-center gap-1">
+                                    <CalendarDays className="w-2.5 h-2.5" /> {sale.deliveryDate}
+                                  </p>
+                                )}
+
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-[10px] text-muted-foreground uppercase font-bold">Repartidor</span>
+                                  {sale.deliveryPersonId ? (
+                                    <span className="text-xs font-medium">{deliveryPersons.find(dp => dp.id === sale.deliveryPersonId)?.name ?? '—'}</span>
+                                  ) : (
+                                    <span className="text-[10px] text-muted-foreground italic">Sin asignar</span>
+                                  )}
+                                </div>
+
+                                {isFailed && sale.failureReason && (
+                                  <p className="text-[10px] text-red-500 italic">{sale.failureReason}</p>
+                                )}
+
+                                {!isFailed && (
+                                  <div className="flex items-center gap-2">
+                                    {deliveryPersons.length > 0 && !FINAL_STATUSES.includes(sale.status) && (
+                                      <Dialog open={assigningDeliveryForSaleId === sale.id} onOpenChange={(open) => setAssigningDeliveryForSaleId(open ? sale.id : null)}>
+                                        <DialogTrigger asChild>
+                                          <Button size="sm" variant="outline" className="flex-1 text-[10px] h-9 px-3 font-bold border-2 border-blue-200 text-blue-600 hover:bg-blue-50 rounded-xl gap-1">
+                                            <Truck className="w-3 h-3" /> {sale.deliveryPersonId ? 'Reasignar' : 'Asignar Repartidor'}
+                                          </Button>
+                                        </DialogTrigger>
+                                        <DialogContent className="sm:max-w-xs">
+                                          <DialogHeader>
+                                            <DialogTitle>Asignar Repartidor</DialogTitle>
+                                          </DialogHeader>
+                                          <div className="space-y-2 py-2">
+                                            {deliveryPersons.map(dp => {
+                                              const isAssigned = sale.deliveryPersonId === dp.id;
+                                              return (
+                                                <button
+                                                  key={dp.id}
+                                                  className={cn(
+                                                    "w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-colors",
+                                                    isAssigned ? "bg-primary/10 border-primary text-primary" : "hover:bg-muted/50"
+                                                  )}
+                                                  onClick={() => {
+                                                    assignDeliveryPerson(sale.id, dp.id);
+                                                    setAssigningDeliveryForSaleId(null);
+                                                  }}
+                                                >
+                                                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">
+                                                    {dp.name.charAt(0)}
+                                                  </div>
+                                                  <div>
+                                                    <p className="font-bold text-sm">{dp.name}</p>
+                                                    <p className="text-[10px] text-muted-foreground">{dp.city}</p>
+                                                  </div>
+                                                  {isAssigned && <span className="ml-auto text-[10px] font-black text-primary">Asignado</span>}
+                                                </button>
+                                              );
+                                            })}
+                                          </div>
+                                        </DialogContent>
+                                      </Dialog>
+                                    )}
+                                    {!sale.settlementId && (
+                                      <AlertDialog>
+                                        <AlertDialogTrigger asChild>
+                                          <Button variant="ghost" size="icon" className="h-9 w-9 text-destructive hover:bg-destructive/10 rounded-xl shrink-0">
+                                            <Trash2 className="w-4 h-4" />
+                                          </Button>
+                                        </AlertDialogTrigger>
+                                        <AlertDialogContent>
+                                          <AlertDialogHeader>
+                                            <AlertDialogTitle>
+                                              {sale.status === 'delivered' ? '¿Eliminar esta venta entregada?' : '¿Eliminar esta venta?'}
+                                            </AlertDialogTitle>
+                                            <AlertDialogDescription>
+                                              {sale.status === 'delivered'
+                                                ? 'El pedido ya fue entregado. Esta acción no puede deshacerse.'
+                                                : 'Esta acción no se puede deshacer. El stock se devolverá al inventario del vendedor automáticamente.'}
+                                            </AlertDialogDescription>
+                                          </AlertDialogHeader>
+                                          <AlertDialogFooter>
+                                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                            <AlertDialogAction onClick={() => deleteSale(sale.id)} className="bg-destructive text-destructive-foreground">
+                                              Eliminar Definitivamente
+                                            </AlertDialogAction>
+                                          </AlertDialogFooter>
+                                        </AlertDialogContent>
+                                      </AlertDialog>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
                       <Table>
                         <TableHeader className="bg-muted/50 dark:bg-background/60">
                           <TableRow className="hover:bg-transparent border-none">
@@ -1019,6 +1152,7 @@ export default function SalesPage() {
                           ))}
                         </TableBody>
                       </Table>
+                      )}
                     </div>
                   </div>
                 </AccordionContent>

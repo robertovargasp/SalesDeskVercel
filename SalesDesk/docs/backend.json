@@ -1,102 +1,228 @@
-
 {
+  "_note": "Modelo de dominio real (Supabase/PostgreSQL). Propiedades en camelCase igual que src/lib/types.ts; las columnas en la DB son snake_case — el mapeo se hace en src/lib/supabase/mappers.ts (ver docs/base-datos.md).",
+  "database": "supabase-postgres",
   "entities": {
     "Product": {
       "title": "Product",
       "description": "Catálogo de productos",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
+        "id": { "type": "string", "format": "uuid" },
         "name": { "type": "string" },
         "price": { "type": "number" },
-        "defaultCommission": { "type": "number" }
+        "defaultCommission": { "type": "number" },
+        "minStock": { "type": "number" },
+        "description": { "type": "string" }
       },
       "required": ["id", "name", "price", "defaultCommission"]
     },
     "UserProfile": {
       "title": "UserProfile",
-      "description": "Perfiles de usuarios con roles y configuración",
+      "description": "Perfiles de usuarios con roles y configuración (extiende auth.users)",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
+        "id": { "type": "string", "format": "uuid" },
         "name": { "type": "string" },
         "username": { "type": "string" },
+        "email": { "type": "string" },
         "phone": { "type": "string" },
+        "whatsapp": { "type": "string" },
         "city": { "type": "string" },
-        "role": { "type": "string", "enum": ["admin", "seller"] },
+        "role": { "type": "string", "enum": ["admin", "seller", "delivery"] },
         "isActive": { "type": "boolean" },
         "settlementFrequency": { "type": "string", "enum": ["weekly", "biweekly"] },
         "settlementStartDay": { "type": "number" }
       },
-      "required": ["id", "name", "username", "city", "role", "isActive"]
+      "required": ["id", "name", "username", "city", "role", "isActive", "settlementFrequency", "settlementStartDay"]
+    },
+    "City": {
+      "title": "City",
+      "description": "Ciudades disponibles",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "name": { "type": "string" }
+      },
+      "required": ["id", "name"]
     },
     "InventoryItem": {
       "title": "InventoryItem",
-      "description": "Stock actual por vendedor",
+      "description": "Stock actual por repartidor + producto",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "productId": { "type": "string" },
-        "sellerId": { "type": "string" },
-        "quantity": { "type": "number" }
+        "id": { "type": "string", "format": "uuid" },
+        "productId": { "type": "string", "format": "uuid" },
+        "deliveryPersonId": { "type": "string", "format": "uuid" },
+        "quantity": { "type": "number" },
+        "reservedQuantity": { "type": "number" }
       },
-      "required": ["id", "productId", "sellerId", "quantity"]
+      "required": ["id", "productId", "deliveryPersonId", "quantity", "reservedQuantity"]
+    },
+    "InventoryAssignment": {
+      "title": "InventoryAssignment",
+      "description": "Solicitudes/movimientos de carga de mercancía a repartidores",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "productId": { "type": "string", "format": "uuid" },
+        "deliveryPersonId": { "type": "string", "format": "uuid" },
+        "quantity": { "type": "number" },
+        "type": { "type": "string", "enum": ["addition", "subtraction"] },
+        "reason": { "type": "string", "enum": ["load", "sale", "adjustment", "return", "correction"] },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "disputed", "cancelled"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "notes": { "type": "string" }
+      },
+      "required": ["id", "productId", "deliveryPersonId", "quantity", "type", "reason", "status", "createdAt"]
+    },
+    "SaleDetail": {
+      "title": "SaleDetail",
+      "description": "Línea de un pedido (order_items)",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string", "format": "uuid" },
+        "quantity": { "type": "number" },
+        "priceAtSale": { "type": "number" },
+        "commissionAtSale": { "type": "number" },
+        "subtotal": { "type": "number" }
+      },
+      "required": ["productId", "quantity", "priceAtSale", "commissionAtSale", "subtotal"]
+    },
+    "SaleEvent": {
+      "title": "SaleEvent",
+      "description": "Evento del historial de un pedido (order_events)",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "enum": ["creation", "assignment", "acceptance", "dispatch", "delivery", "payment", "cancel", "schedule", "failure"] },
+        "userId": { "type": ["string", "null"], "format": "uuid" },
+        "userName": { "type": "string" },
+        "note": { "type": "string" }
+      },
+      "required": ["date", "type", "userName"]
     },
     "Sale": {
       "title": "Sale",
-      "description": "Registro de transacciones de venta",
+      "description": "Pedido/venta (orders) con sus líneas y eventos",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "sellerId": { "type": "string" },
+        "id": { "type": "string", "format": "uuid" },
+        "sellerId": { "type": "string", "format": "uuid" },
+        "deliveryPersonId": { "type": "string", "format": "uuid" },
+        "city": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["assigned", "accepted", "contacting", "scheduled", "in_transit", "delivered", "delivery_confirmed", "cancelled", "paid", "delivery_failed", "pending_return"]
+        },
         "totalVenta": { "type": "number" },
         "totalComision": { "type": "number" },
         "totalDeposito": { "type": "number" },
-        "status": { "type": "string", "enum": ["assigned", "en_route", "delivered", "paid"] },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "customerAddress": { "type": "string" },
+        "googleMapsLink": { "type": "string" },
+        "deliveryDate": { "type": "string", "format": "date" },
+        "deliveryTime": { "type": "string" },
+        "notes": { "type": "string" },
+        "settlementId": { "type": "string", "format": "uuid" },
+        "photoUrl": { "type": "string" },
+        "deliveryPhotoUrl": { "type": "string" },
+        "failureReason": { "type": "string" },
+        "failureStep": { "type": "number" },
+        "failedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "items": { "type": "array", "items": { "$ref": "#/entities/SaleDetail" } },
+        "events": { "type": "array", "items": { "$ref": "#/entities/SaleEvent" } }
       },
-      "required": ["id", "sellerId", "totalVenta", "totalComision", "totalDeposito", "status", "createdAt"]
+      "required": ["id", "sellerId", "city", "status", "totalVenta", "totalComision", "totalDeposito", "createdAt", "items", "events"]
+    },
+    "KardexEntry": {
+      "title": "KardexEntry",
+      "description": "Auditoría de movimientos de inventario (kardex_entries)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "productId": { "type": "string", "format": "uuid" },
+        "sellerId": { "type": "string", "format": "uuid" },
+        "deliveryPersonId": { "type": "string", "format": "uuid" },
+        "type": { "type": "string", "enum": ["addition", "subtraction"] },
+        "reason": { "type": "string", "enum": ["load", "sale", "adjustment", "return", "correction"] },
+        "quantity": { "type": "number" },
+        "balanceBefore": { "type": "number" },
+        "balanceAfter": { "type": "number" },
+        "userId": { "type": ["string", "null"], "format": "uuid" },
+        "userName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "saleId": { "type": "string", "format": "uuid" },
+        "notes": { "type": "string" }
+      },
+      "required": ["id", "productId", "sellerId", "type", "reason", "quantity", "balanceBefore", "balanceAfter", "userName", "createdAt"]
     },
     "WeeklySettlement": {
       "title": "WeeklySettlement",
-      "description": "Reportes de liquidación semanal",
+      "description": "Reportes de liquidación (settlements)",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "sellerId": { "type": "string" },
+        "id": { "type": "string", "format": "uuid" },
+        "sellerId": { "type": "string", "format": "uuid" },
+        "weekRange": { "type": "string" },
+        "totalVenta": { "type": "number" },
+        "totalComision": { "type": "number" },
         "totalDeposito": { "type": "number" },
-        "status": { "type": "string", "enum": ["pending", "reported", "confirmed"] }
+        "status": { "type": "string", "enum": ["pending", "reported", "confirmed", "rejected"] },
+        "proofUrl": { "type": "string" },
+        "reference": { "type": "string" },
+        "reportedAt": { "type": "string", "format": "date-time" },
+        "confirmedAt": { "type": "string", "format": "date-time" },
+        "rejectionReason": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "sellerId", "totalDeposito", "status"]
+      "required": ["id", "sellerId", "weekRange", "totalVenta", "totalComision", "totalDeposito", "status", "createdAt"]
+    },
+    "AppConfig": {
+      "title": "AppConfig",
+      "description": "Configuración global key/value (ej. payment_info)",
+      "type": "object",
+      "properties": {
+        "key": { "type": "string" },
+        "value": { "type": "string" }
+      },
+      "required": ["key", "value"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Notificaciones por usuario",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "userId": { "type": "string", "format": "uuid" },
+        "type": { "type": "string" },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "isRead": { "type": "boolean" },
+        "payload": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "type", "title", "isRead", "createdAt"]
     }
   },
   "auth": {
-    "providers": ["password"]
+    "provider": "supabase-auth",
+    "methods": ["password"]
   },
-  "firestore": {
-    "/products/{productId}": {
-      "schema": { "$ref": "#/entities/Product" },
-      "description": "Catálogo global de productos"
-    },
-    "/users/{userId}": {
-      "schema": { "$ref": "#/entities/UserProfile" },
-      "description": "Perfiles y roles de usuario"
-    },
-    "/inventory/{inventoryId}": {
-      "schema": { "$ref": "#/entities/InventoryItem" },
-      "description": "Stock real en manos de vendedores"
-    },
-    "/sales/{saleId}": {
-      "schema": { "$ref": "#/entities/Sale" },
-      "description": "Cabeceras de venta y eventos"
-    },
-    "/settlements/{settlementId}": {
-      "schema": { "$ref": "#/entities/WeeklySettlement" },
-      "description": "Liquidaciones de dinero"
-    },
-    "/assignments/{assignmentId}": {
-      "schema": { "$ref": "#/entities/InventoryAssignment" },
-      "description": "Historial de movimientos de stock"
-    }
+  "tables": {
+    "profiles": { "schema": { "$ref": "#/entities/UserProfile" }, "description": "Usuarios, roles y configuración (extiende auth.users)" },
+    "products": { "schema": { "$ref": "#/entities/Product" }, "description": "Catálogo de productos" },
+    "cities": { "schema": { "$ref": "#/entities/City" }, "description": "Ciudades disponibles" },
+    "inventory_items": { "schema": { "$ref": "#/entities/InventoryItem" }, "description": "Stock actual por repartidor + producto" },
+    "inventory_assignments": { "schema": { "$ref": "#/entities/InventoryAssignment" }, "description": "Movimientos/cargas de mercancía" },
+    "orders": { "schema": { "$ref": "#/entities/Sale" }, "description": "Pedidos/ventas" },
+    "order_items": { "schema": { "$ref": "#/entities/SaleDetail" }, "description": "Líneas de cada pedido" },
+    "order_events": { "schema": { "$ref": "#/entities/SaleEvent" }, "description": "Historial de estados de cada pedido" },
+    "kardex_entries": { "schema": { "$ref": "#/entities/KardexEntry" }, "description": "Auditoría de inventario" },
+    "settlements": { "schema": { "$ref": "#/entities/WeeklySettlement" }, "description": "Liquidaciones de depósitos" },
+    "app_config": { "schema": { "$ref": "#/entities/AppConfig" }, "description": "Configuración global key/value" },
+    "notifications": { "schema": { "$ref": "#/entities/Notification" }, "description": "Notificaciones por usuario" }
   }
 }

@@ -250,12 +250,12 @@ export default function UsersPage() {
           <p className="text-muted-foreground text-sm">Vendedores y repartidores del sistema</p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="relative">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+          <div className="relative w-full sm:w-48">
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Filtrar por ciudad..."
-              className="pl-9 w-48"
+              className="pl-9 w-full"
               value={filterCity}
               onChange={(e) => setFilterCity(e.target.value)}
             />
@@ -294,7 +294,7 @@ export default function UsersPage() {
                   {showErr('name')}
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Usuario</Label>
                     <Input
@@ -319,7 +319,7 @@ export default function UsersPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label className="flex items-center gap-2"><Phone className="w-4 h-4" /> Teléfono</Label>
                     <Input
@@ -427,9 +427,9 @@ export default function UsersPage() {
       </div>
 
       <Tabs defaultValue="sellers">
-        <TabsList className="mb-4">
-          <TabsTrigger value="sellers">Vendedores ({sellers.length})</TabsTrigger>
-          <TabsTrigger value="delivery">Repartidores ({deliveryUsers.length})</TabsTrigger>
+        <TabsList className="mb-4 w-full justify-start overflow-x-auto max-w-full">
+          <TabsTrigger value="sellers" className="whitespace-nowrap">Vendedores ({sellers.length})</TabsTrigger>
+          <TabsTrigger value="delivery" className="whitespace-nowrap">Repartidores ({deliveryUsers.length})</TabsTrigger>
         </TabsList>
 
         <TabsContent value="sellers">

@@ -298,7 +298,7 @@ export default function DashboardPage() {
                 {sellerRows.length > 0 ? (
                   <div className="divide-y">
                     {sellerRows.map(row => (
-                      <div key={row.seller.id} className="flex items-center justify-between px-6 py-3 hover:bg-muted/30 transition-colors">
+                      <div key={row.seller.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 md:px-6 py-3 hover:bg-muted/30 transition-colors">
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-black shrink-0">
                             {row.seller.name.charAt(0)}
@@ -308,7 +308,7 @@ export default function DashboardPage() {
                             <p className="text-[10px] text-muted-foreground">{row.seller.city}</p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-4 text-right shrink-0">
+                        <div className="flex items-center flex-wrap justify-end gap-4 text-right w-full sm:w-auto shrink-0">
                           <div>
                             <p className="text-[10px] text-muted-foreground">Ventas</p>
                             <p className="text-xs font-black">${row.totalVenta.toLocaleString()}</p>
@@ -350,7 +350,7 @@ export default function DashboardPage() {
               {deliveryRows.length > 0 ? (
                 <div className="divide-y">
                   {deliveryRows.map(row => (
-                    <div key={row.dp.id} className="flex items-center justify-between px-6 py-3 hover:bg-muted/30 transition-colors">
+                    <div key={row.dp.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 md:px-6 py-3 hover:bg-muted/30 transition-colors">
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center text-xs font-black shrink-0">
                           {row.dp.name.charAt(0)}
@@ -360,7 +360,7 @@ export default function DashboardPage() {
                           <p className="text-[10px] text-muted-foreground">{row.dp.city}</p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-4 text-right shrink-0">
+                      <div className="flex items-center flex-wrap justify-end gap-4 text-right w-full sm:w-auto shrink-0">
                         <div>
                           <p className="text-[10px] text-muted-foreground">Entregados</p>
                           <p className="text-xs font-black text-green-600">{row.entregados}</p>

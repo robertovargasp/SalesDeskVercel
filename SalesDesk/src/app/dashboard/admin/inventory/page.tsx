@@ -264,9 +264,9 @@ export default function InventoryPage() {
           <h1 className="text-3xl font-black tracking-tight text-primary">Control de Mercancía</h1>
           <p className="text-muted-foreground text-sm">Estado actual de stock por repartidor</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full md:w-auto">
           <Select value={filterDeliveryId} onValueChange={setFilterDeliveryId}>
-            <SelectTrigger className="w-[220px] bg-white border-none shadow-sm rounded-xl h-11">
+            <SelectTrigger className="w-full sm:w-[220px] bg-white border-none shadow-sm rounded-xl h-11">
               <div className="flex items-center gap-2">
                 <Filter className="w-4 h-4 text-primary" />
                 <SelectValue placeholder="Filtrar Repartidor" />
@@ -361,11 +361,11 @@ export default function InventoryPage() {
       )}
 
       <Tabs defaultValue="stock">
-        <TabsList className="mb-4">
-          <TabsTrigger value="stock">Stock Actual</TabsTrigger>
-          <TabsTrigger value="pendientes">Pendiente a Confirmar</TabsTrigger>
-          <TabsTrigger value="ciudad">Por Ciudad</TabsTrigger>
-          <TabsTrigger value="kardex">Kardex / Historial</TabsTrigger>
+        <TabsList className="mb-4 w-full justify-start overflow-x-auto max-w-full">
+          <TabsTrigger value="stock" className="whitespace-nowrap">Stock Actual</TabsTrigger>
+          <TabsTrigger value="pendientes" className="whitespace-nowrap">Pendiente a Confirmar</TabsTrigger>
+          <TabsTrigger value="ciudad" className="whitespace-nowrap">Por Ciudad</TabsTrigger>
+          <TabsTrigger value="kardex" className="whitespace-nowrap">Kardex / Historial</TabsTrigger>
         </TabsList>
 
         <TabsContent value="stock">
@@ -374,7 +374,7 @@ export default function InventoryPage() {
           {deliveryInventoryMap.map((group) => (
             <Card key={group.deliveryPerson.id} className="border-none shadow-xl overflow-hidden bg-white rounded-3xl">
               <CardHeader
-                className="bg-muted/30 pb-6 pt-8 px-8 flex flex-row items-center justify-between cursor-pointer select-none"
+                className="bg-muted/30 pb-6 pt-6 md:pt-8 px-5 md:px-8 flex flex-row items-center justify-between cursor-pointer select-none gap-3"
                 onClick={() => toggleStock(group.deliveryPerson.id)}
               >
                 <div className="flex items-center gap-4">
@@ -403,7 +403,7 @@ export default function InventoryPage() {
               <CardContent className="p-0">
                 <div className="divide-y">
                   {group.items.map((item, idx) => (
-                    <div key={idx} className="flex items-center justify-between p-6 hover:bg-muted/5 transition-colors">
+                    <div key={idx} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 md:p-6 hover:bg-muted/5 transition-colors">
                       <div className="flex items-center gap-4">
                         <div className={cn(
                           "w-10 h-10 rounded-xl flex items-center justify-center",
@@ -416,7 +416,7 @@ export default function InventoryPage() {
                           <p className="text-[10px] text-muted-foreground font-medium">${item.product.price.toLocaleString()} c/u</p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-6">
+                      <div className="flex items-center justify-between sm:justify-end gap-4 md:gap-6 w-full sm:w-auto">
                         <div className="text-center min-w-[60px]">
                           <p className="text-[9px] font-black text-muted-foreground uppercase tracking-widest mb-1">Total</p>
                           <p className="text-2xl font-black tracking-tighter text-foreground">{item.quantity}</p>
@@ -464,8 +464,8 @@ export default function InventoryPage() {
         </div>
 
         <div className="lg:col-span-4 space-y-6">
-          <Card className="border-none shadow-2xl bg-white sticky top-6 rounded-3xl overflow-hidden border-t-8 border-t-primary">
-            <CardHeader className="p-8">
+          <Card className="border-none shadow-2xl bg-white lg:sticky lg:top-6 rounded-3xl overflow-hidden border-t-8 border-t-primary">
+            <CardHeader className="p-5 md:p-8">
               <div className="flex items-center gap-4">
                 <div className="bg-primary/10 p-3 rounded-2xl text-primary">
                   <Send className="w-6 h-6" />
@@ -476,7 +476,7 @@ export default function InventoryPage() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="px-8 pb-8">
+            <CardContent className="px-5 pb-5 md:px-8 md:pb-8">
               <form onSubmit={handleBatchAssign} className="space-y-8">
                 <div className="space-y-3">
                   <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Responsable de Recepción</Label>
@@ -677,6 +677,7 @@ export default function InventoryPage() {
               </div>
             </CardHeader>
             <CardContent className="p-0">
+              <div className="hidden md:block">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -762,6 +763,63 @@ export default function InventoryPage() {
                   )}
                 </TableBody>
               </Table>
+              </div>
+
+              {/* Móvil: tarjetas */}
+              <div className="md:hidden divide-y">
+                {historyRows.length === 0 ? (
+                  <p className="text-center py-12 text-muted-foreground italic text-sm">Sin movimientos registrados</p>
+                ) : (
+                  historyRows.map(row => {
+                    if (row.kind === 'cancel') {
+                      const a = row.assignment;
+                      const product = products.find(p => p.id === a.productId);
+                      const deliveryPerson = users.find(u => u.id === a.deliveryPersonId);
+                      return (
+                        <div key={`m-cancel-${a.id}`} className="p-4 space-y-1.5">
+                          <div className="flex justify-between items-start gap-2">
+                            <p className="text-sm font-bold">{product?.name || a.productId}</p>
+                            <span className="text-sm font-black flex items-center gap-1 shrink-0 text-red-600">
+                              <ArrowDownCircle className="w-3.5 h-3.5" /> -{a.quantity}
+                            </span>
+                          </div>
+                          <Badge className="text-[10px] border-0 bg-red-100 text-red-800">Cancelación</Badge>
+                          {a.notes && <p className="text-[10px] text-muted-foreground">{a.notes}</p>}
+                          <div className="flex justify-between text-[10px] text-muted-foreground pt-1">
+                            <span>{deliveryPerson?.name || '—'}</span>
+                            <span>{format(new Date(a.updatedAt ?? a.createdAt), 'dd/MM/yy HH:mm', { locale: es })}</span>
+                          </div>
+                        </div>
+                      );
+                    }
+                    const entry = row.entry;
+                    const product = products.find(p => p.id === entry.productId);
+                    const deliveryPerson = users.find(u => u.id === entry.deliveryPersonId);
+                    const isAddition = entry.type === 'addition';
+                    return (
+                      <div key={`m-${entry.id}`} className="p-4 space-y-1.5">
+                        <div className="flex justify-between items-start gap-2">
+                          <p className="text-sm font-bold">{product?.name || entry.productId}</p>
+                          <span className={cn("text-sm font-black flex items-center gap-1 shrink-0", isAddition ? "text-green-600" : "text-red-600")}>
+                            {isAddition ? <ArrowUpCircle className="w-3.5 h-3.5" /> : <ArrowDownCircle className="w-3.5 h-3.5" />}
+                            {isAddition ? '+' : '-'}{entry.quantity}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge className={cn("text-[10px] border-0", isAddition ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
+                            {REASON_LABELS[entry.reason]}
+                          </Badge>
+                          <span className="text-[10px] text-muted-foreground">Antes {entry.balanceBefore} → Después {entry.balanceAfter}</span>
+                        </div>
+                        <div className="flex justify-between text-[10px] text-muted-foreground pt-1">
+                          <span>{deliveryPerson?.name || '—'} · {entry.userName}</span>
+                          <span>{format(new Date(entry.createdAt), 'dd/MM/yy HH:mm', { locale: es })}</span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
             </CardContent>
             {kardexHasMore && (
               <div className="flex justify-center p-4 border-t">

@@ -4,7 +4,7 @@ import { useStore } from '@/hooks/use-store';
 import { useUser } from '@/providers/SupabaseProvider';
 import { useRouter } from 'next/navigation';
 import { SidebarNav } from '@/components/dashboard/sidebar-nav';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -18,6 +18,7 @@ export default function DashboardLayout({
   const { currentUser, logout, isProfileLoading } = useStore();
   const { user, isUserLoading } = useUser();
   const router = useRouter();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     if (!isUserLoading && !user) {
@@ -84,14 +85,14 @@ export default function DashboardLayout({
           <TrendingUp className="text-primary w-6 h-6" />
           <span className="font-bold text-lg">SalesDesk</span>
         </div>
-        <Sheet>
+        <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <SheetTrigger asChild>
             <Button variant="ghost" size="icon">
               <Menu className="w-6 h-6" />
             </Button>
           </SheetTrigger>
           <SheetContent side="left" className="p-0 w-64">
-            <SidebarNav role={currentUser.role} onLogout={handleLogout} />
+            <SidebarNav role={currentUser.role} onLogout={handleLogout} onNavigate={() => setMobileOpen(false)} />
           </SheetContent>
         </Sheet>
       </header>

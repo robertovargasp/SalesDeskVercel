@@ -19,10 +19,12 @@ import {
   DialogTrigger, DialogDescription, DialogFooter
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { applyDateFilter, getDateRange, DATE_FILTER_LABELS, DateRangeFilter } from '@/lib/date-filters';
 
 export default function AdminSettlementsPage() {
   const { settlements, users, sales, paymentInfo, updatePaymentInfo, confirmSettlement, rejectSettlement } = useStore();
+  const isMobile = useIsMobile();
   const [isEditingInfo, setIsEditingInfo] = useState(false);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
@@ -276,6 +278,7 @@ export default function AdminSettlementsPage() {
             </div>
           </CardHeader>
           <CardContent className="p-0">
+            <div className="hidden md:block">
             <Table>
               <TableHeader className="bg-muted/30 dark:bg-muted/70">
                 <TableRow className="hover:bg-transparent border-none">
@@ -319,6 +322,33 @@ export default function AdminSettlementsPage() {
                 </TableRow>
               </TableBody>
             </Table>
+            </div>
+            <div className="md:hidden divide-y">
+              {citySummary.map((row) => (
+                <div key={row.city} className="p-4 space-y-1.5">
+                  <div className="flex justify-between items-center gap-2">
+                    <span className="font-black text-sm uppercase tracking-tight">{row.city}</span>
+                    <Badge variant="secondary" className="font-bold text-xs shrink-0">{row.count} ventas</Badge>
+                  </div>
+                  <div className="flex justify-between text-xs pt-1 border-t flex-wrap gap-x-3">
+                    <span>Cobrado: <b>${row.totalVenta.toLocaleString()}</b></span>
+                    <span className="text-orange-500">Com: <b>${row.totalComision.toLocaleString()}</b></span>
+                    <span className="text-primary">Neta: <b>${row.ventaNeta.toLocaleString()}</b></span>
+                  </div>
+                </div>
+              ))}
+              <div className="p-4 bg-muted/20 space-y-1.5">
+                <div className="flex justify-between items-center">
+                  <span className="font-black text-[10px] uppercase tracking-widest text-muted-foreground">Total General</span>
+                  <span className="font-black text-xs">{filteredSales.length} ventas</span>
+                </div>
+                <div className="flex justify-between text-xs pt-1 border-t flex-wrap gap-x-3">
+                  <span>Cobrado: <b>${summary.totalVenta.toLocaleString()}</b></span>
+                  <span className="text-orange-500">Com: <b>${summary.totalComision.toLocaleString()}</b></span>
+                  <span className="text-primary">Neta: <b>${summary.ventaNeta.toLocaleString()}</b></span>
+                </div>
+              </div>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -408,6 +438,87 @@ export default function AdminSettlementsPage() {
               </div>
             </CardHeader>
             <CardContent className="p-0">
+              {isMobile ? (
+                <div className="divide-y">
+                  {filteredSettlements.length === 0 ? (
+                    <p className="text-center py-16 text-muted-foreground italic text-sm">No hay reportes que coincidan con los filtros</p>
+                  ) : filteredSettlements.map((s) => {
+                    const seller = users.find(u => u.id === s.sellerId);
+                    return (
+                      <div key={s.id} className={cn("p-4 space-y-3", s.status === 'reported' && 'bg-orange-50/30')}>
+                        <div className="flex justify-between items-start gap-2">
+                          <div>
+                            <p className="font-bold text-sm">{seller?.name}</p>
+                            <p className="text-[10px] text-muted-foreground uppercase">{s.weekRange}</p>
+                          </div>
+                          <Badge className={cn(
+                            'text-[9px] uppercase font-black tracking-widest px-2 h-5 border-none shrink-0',
+                            s.status === 'reported'  ? 'bg-orange-100 text-orange-700' :
+                            s.status === 'confirmed' ? 'bg-green-100 text-green-700' :
+                            s.status === 'rejected'  ? 'bg-red-100 text-red-700' :
+                            'bg-muted text-muted-foreground'
+                          )}>
+                            {s.status === 'reported'  ? 'Por Validar' :
+                             s.status === 'confirmed' ? 'Confirmado' :
+                             s.status === 'rejected'  ? 'Rechazado' : s.status}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] text-muted-foreground uppercase font-bold">Depósito</span>
+                          <span className="font-black text-primary text-lg">${s.totalDeposito.toLocaleString()}</span>
+                        </div>
+                        {s.reference && (
+                          <span className="text-[10px] font-medium flex items-center gap-1.5 bg-muted/50 w-fit px-2 py-0.5 rounded">
+                            <FileText className="w-3 h-3" /> {s.reference}
+                          </span>
+                        )}
+                        {s.proofUrl && (
+                          <Dialog>
+                            <DialogTrigger asChild>
+                              <Button variant="outline" size="sm" className="w-full h-9 text-[11px] gap-2 border-primary/20 hover:bg-primary/5">
+                                <ImageIcon className="w-3.5 h-3.5 text-primary" /> Ver Ticket
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent className="sm:max-w-lg">
+                              <DialogHeader>
+                                <DialogTitle>Validación de Comprobante</DialogTitle>
+                                <DialogDescription className="text-xs">
+                                  Vendedor: <span className="font-bold">{seller?.name}</span> | Folio: <span className="font-bold">{s.reference}</span>
+                                </DialogDescription>
+                              </DialogHeader>
+                              <div className="p-2 bg-muted/30 rounded-2xl overflow-hidden border">
+                                <img src={s.proofUrl} alt="Comprobante" className="w-full h-auto max-h-[70vh] object-contain rounded-xl shadow-lg" />
+                              </div>
+                              <DialogFooter>
+                                {s.status === 'reported' && (
+                                  <Button className="w-full h-12 gap-2 text-base font-bold" onClick={() => confirmSettlement(s.id)}>
+                                    <CheckCircle2 className="w-5 h-5" /> Aprobar Depósito de ${s.totalDeposito.toLocaleString()}
+                                  </Button>
+                                )}
+                              </DialogFooter>
+                            </DialogContent>
+                          </Dialog>
+                        )}
+                        {s.status === 'reported' && (
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="outline" className="flex-1 h-9 gap-1.5 text-[11px] font-bold border-red-200 text-red-600 hover:bg-red-50" onClick={() => { setRejectingId(s.id); setRejectionReason(''); }}>
+                              <XCircle className="w-3.5 h-3.5" /> Rechazar
+                            </Button>
+                            <Button size="sm" className="flex-1 h-9 gap-1.5 text-[11px] font-bold shadow-sm" onClick={() => confirmSettlement(s.id)}>
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Aprobar
+                            </Button>
+                          </div>
+                        )}
+                        {s.status === 'confirmed' && (
+                          <p className="text-[10px] text-green-600 flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5" /> Confirmado {new Date(s.confirmedAt!).toLocaleDateString()}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
               <Table>
                 <TableHeader className="bg-muted/30 dark:bg-muted/70">
                   <TableRow>
@@ -459,7 +570,7 @@ export default function AdminSettlementsPage() {
                                     </DialogDescription>
                                   </DialogHeader>
                                   <div className="p-2 bg-muted/30 rounded-2xl overflow-hidden border">
-                                    <img src={s.proofUrl} alt="Comprobante" className="w-full h-auto rounded-xl shadow-lg" />
+                                    <img src={s.proofUrl} alt="Comprobante" className="w-full h-auto max-h-[70vh] object-contain rounded-xl shadow-lg" />
                                   </div>
                                   <DialogFooter>
                                     {s.status === 'reported' && (
@@ -535,6 +646,7 @@ export default function AdminSettlementsPage() {
                   )}
                 </TableBody>
               </Table>
+              )}
             </CardContent>
           </Card>
         </div>

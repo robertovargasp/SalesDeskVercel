@@ -824,9 +824,9 @@ export default function SellerSalesPage() {
                 </div>
               </DialogHeader>
             </div>
-            <div className="p-8 space-y-8">
+            <div className="p-4 md:p-8 space-y-8">
               {/* Repartidor + Ciudad */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-muted/30 p-8 rounded-3xl border border-dashed border-primary/20">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-muted/30 p-4 md:p-8 rounded-3xl border border-dashed border-primary/20">
                 <div className="space-y-2">
                   <Label className="text-xs font-bold uppercase text-muted-foreground flex items-center gap-1">
                     <Truck className="w-3.5 h-3.5" /> Repartidor <span className="text-destructive">*</span>
@@ -873,8 +873,8 @@ export default function SellerSalesPage() {
               {/* Productos */}
               <div className="space-y-4">
                 <Label className="text-xs font-bold uppercase text-muted-foreground tracking-widest">Mercancía Entregada</Label>
-                <div className="rounded-2xl border bg-card shadow-sm overflow-hidden">
-                  <table className="w-full text-sm">
+                <div className="rounded-2xl border bg-card shadow-sm overflow-x-auto">
+                  <table className="w-full text-sm min-w-[480px]">
                     <thead className="bg-muted/50">
                       <tr>
                         <th className="text-[10px] h-10 uppercase font-black text-left pl-6">Producto</th>
@@ -953,7 +953,7 @@ export default function SellerSalesPage() {
 
               {/* Totales */}
               {nsTotals.items.length > 0 && (
-                <div className="bg-primary/5 p-8 rounded-3xl space-y-6 border border-primary/20">
+                <div className="bg-primary/5 p-4 md:p-8 rounded-3xl space-y-6 border border-primary/20">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                     <div className="space-y-3 bg-white p-5 rounded-2xl shadow-sm border border-primary/10">
                       <Label className="text-[10px] text-muted-foreground uppercase font-black tracking-widest">Cobro al Cliente</Label>

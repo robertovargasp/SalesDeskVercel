@@ -135,7 +135,7 @@ export default function AdminDeliveryPage() {
       </div>
 
       {/* ── Header financiero ─────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
         <Card className="border-none shadow-sm bg-primary border-l-8 border-l-primary-foreground/30">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-black text-primary-foreground/70 uppercase flex items-center gap-2">
@@ -445,6 +445,8 @@ export default function AdminDeliveryPage() {
                         {enRuta.length === 0 ? (
                           <p className="text-xs text-muted-foreground italic px-1">Sin pedidos en esta sección</p>
                         ) : (
+                          <>
+                          <div className="hidden md:block">
                           <Table>
                             <TableHeader className="bg-orange-50/60 dark:bg-background/60 dark:[&_th]:text-foreground">
                               <TableRow>
@@ -484,6 +486,27 @@ export default function AdminDeliveryPage() {
                               ))}
                             </TableBody>
                           </Table>
+                          </div>
+                          <div className="md:hidden space-y-2">
+                            {enRuta.map(s => (
+                              <div key={s.id} className="rounded-xl border p-3 space-y-2">
+                                <div className="flex justify-between items-start gap-2">
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-bold truncate">{s.customerName || 'N/A'}</p>
+                                    {s.customerPhone && <p className="text-[10px] text-muted-foreground">{s.customerPhone}</p>}
+                                  </div>
+                                  <StatusBadge status={s.status} />
+                                </div>
+                                <p className="text-[11px] text-muted-foreground">{getProductsText(s)}</p>
+                                <p className="text-[10px] text-muted-foreground">{s.city || '—'}</p>
+                                <div className="flex justify-between text-xs pt-1 border-t">
+                                  <span>Venta: <b>${s.totalVenta.toLocaleString()}</b></span>
+                                  <span className="text-green-600">Com: <b>${s.totalComision.toLocaleString()}</b></span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          </>
                         )}
                       </div>
 
@@ -495,6 +518,8 @@ export default function AdminDeliveryPage() {
                         {pendienteLiquidar.length === 0 ? (
                           <p className="text-xs text-muted-foreground italic px-1">Sin pedidos en esta sección</p>
                         ) : (
+                          <>
+                          <div className="hidden md:block">
                           <Table>
                             <TableHeader className="bg-amber-50/60 dark:bg-background/60 dark:[&_th]:text-foreground">
                               <TableRow>
@@ -534,6 +559,25 @@ export default function AdminDeliveryPage() {
                               ))}
                             </TableBody>
                           </Table>
+                          </div>
+                          <div className="md:hidden space-y-2">
+                            {pendienteLiquidar.map(s => (
+                              <div key={s.id} className="rounded-xl border p-3 space-y-2">
+                                <div className="min-w-0">
+                                  <p className="text-xs font-bold truncate">{s.customerName || 'N/A'}</p>
+                                  {s.customerPhone && <p className="text-[10px] text-muted-foreground">{s.customerPhone}</p>}
+                                </div>
+                                <p className="text-[11px] text-muted-foreground">{getProductsText(s)}</p>
+                                <p className="text-[10px] text-muted-foreground">{s.city || '—'}</p>
+                                <div className="flex justify-between text-xs pt-1 border-t flex-wrap gap-x-3">
+                                  <span>Cobrado: <b>${s.totalVenta.toLocaleString()}</b></span>
+                                  <span className="text-orange-600">A depositar: <b>${s.totalDeposito.toLocaleString()}</b></span>
+                                  <span className="text-green-600">Com: <b>${s.totalComision.toLocaleString()}</b></span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          </>
                         )}
                       </div>
 
@@ -545,6 +589,8 @@ export default function AdminDeliveryPage() {
                         {liquidados.length === 0 ? (
                           <p className="text-xs text-muted-foreground italic px-1">Sin pedidos en esta sección</p>
                         ) : (
+                          <>
+                          <div className="hidden md:block">
                           <Table>
                             <TableHeader className="bg-primary/5 dark:bg-background/60 dark:[&_th]:text-foreground">
                               <TableRow>
@@ -584,6 +630,25 @@ export default function AdminDeliveryPage() {
                               ))}
                             </TableBody>
                           </Table>
+                          </div>
+                          <div className="md:hidden space-y-2">
+                            {liquidados.map(s => (
+                              <div key={s.id} className="rounded-xl border p-3 space-y-2">
+                                <div className="min-w-0">
+                                  <p className="text-xs font-bold truncate">{s.customerName || 'N/A'}</p>
+                                  {s.customerPhone && <p className="text-[10px] text-muted-foreground">{s.customerPhone}</p>}
+                                </div>
+                                <p className="text-[11px] text-muted-foreground">{getProductsText(s)}</p>
+                                <p className="text-[10px] text-muted-foreground">{s.city || '—'}</p>
+                                <div className="flex justify-between text-xs pt-1 border-t flex-wrap gap-x-3">
+                                  <span>Cobrado: <b>${s.totalVenta.toLocaleString()}</b></span>
+                                  <span className="text-primary">Depositado: <b>${s.totalDeposito.toLocaleString()}</b></span>
+                                  <span className="text-green-600">Com: <b>${s.totalComision.toLocaleString()}</b></span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          </>
                         )}
                       </div>
 

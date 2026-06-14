@@ -114,7 +114,7 @@ export default function DeliveryInventoryPage() {
       </div>
 
       {/* Header cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-3 gap-3 md:gap-4 [&_p.text-4xl]:text-2xl [&_p.text-4xl]:sm:text-4xl">
         <Card className="border-none shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-[10px] font-bold uppercase text-muted-foreground">Total</CardTitle>
@@ -160,7 +160,7 @@ export default function DeliveryInventoryPage() {
               {myPendingAssignments.map(a => {
                 const product = products.find(p => p.id === a.productId);
                 return (
-                  <div key={a.id} className="flex items-center justify-between px-6 py-4">
+                  <div key={a.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 md:px-6 py-4">
                     <div className="space-y-0.5">
                       <p className="text-sm font-black">{product?.name ?? a.productId}</p>
                       <p className="text-xs text-muted-foreground">
@@ -168,18 +168,18 @@ export default function DeliveryInventoryPage() {
                         {a.notes && ` · ${a.notes}`}
                       </p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
                       <Button
                         size="sm"
                         variant="outline"
-                        className="gap-1.5 h-9 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+                        className="flex-1 sm:flex-none gap-1.5 h-9 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
                         onClick={() => { setCancelTarget(a); setCancelNote(''); }}
                       >
                         <XCircle className="w-4 h-4" /> Cancelar
                       </Button>
                       <Button
                         size="sm"
-                        className="gap-1.5 bg-green-600 hover:bg-green-700 h-9"
+                        className="flex-1 sm:flex-none gap-1.5 bg-green-600 hover:bg-green-700 h-9"
                         onClick={() => handleConfirm(a.id)}
                       >
                         <CheckCircle2 className="w-4 h-4" /> Confirmar Recepción
@@ -209,6 +209,8 @@ export default function DeliveryInventoryPage() {
               <p className="text-sm text-muted-foreground italic">Sin stock asignado actualmente.</p>
             </div>
           ) : (
+            <>
+            <div className="hidden md:block">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -259,6 +261,41 @@ export default function DeliveryInventoryPage() {
                 })}
               </TableBody>
             </Table>
+            </div>
+
+            {/* Móvil: tarjetas */}
+            <div className="md:hidden divide-y">
+              {stockRows.map(({ product, quantity, reservedQuantity, available }) => {
+                const minStock = product.minStock ?? 4;
+                const isLow = available < minStock;
+                return (
+                  <div key={product.id} className="p-4 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-sm font-bold truncate">{product.name}</span>
+                        {isLow && <Badge className="text-[10px] bg-orange-100 text-orange-700 border-0 h-5 shrink-0">STOCK BAJO</Badge>}
+                      </div>
+                      <span className="text-xs text-muted-foreground shrink-0">${product.price.toLocaleString()}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="text-center">
+                        <p className="text-[9px] font-black uppercase text-muted-foreground">Total</p>
+                        <p className="text-lg font-black text-foreground">{quantity}</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-[9px] font-black uppercase text-orange-500">Reservado</p>
+                        <p className="text-lg font-black text-orange-500">{reservedQuantity}</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-[9px] font-black uppercase text-green-600">Disponible</p>
+                        <p className={cn("text-lg font-black", available === 0 ? "text-muted-foreground/30" : isLow ? "text-orange-500" : "text-green-600")}>{available}</p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            </>
           )}
         </CardContent>
       </Card>
@@ -337,6 +374,8 @@ export default function DeliveryInventoryPage() {
               {hasFilters ? 'Sin movimientos con los filtros aplicados.' : 'Sin movimientos registrados.'}
             </p>
           ) : (
+            <>
+            <div className="hidden md:block">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -384,6 +423,38 @@ export default function DeliveryInventoryPage() {
                 })}
               </TableBody>
             </Table>
+            </div>
+
+            {/* Móvil: tarjetas */}
+            <div className="md:hidden divide-y">
+              {filteredKardex.map(entry => {
+                const product = products.find(p => p.id === entry.productId);
+                const sellerName = entry.sellerId ? (users.find(u => u.id === entry.sellerId)?.name ?? '—') : '—';
+                const isAddition = entry.type === 'addition';
+                return (
+                  <div key={entry.id} className="p-4 space-y-1.5">
+                    <div className="flex justify-between items-start gap-2">
+                      <p className="text-sm font-bold">{product?.name ?? entry.productId}</p>
+                      <span className={cn("text-sm font-black flex items-center gap-1 shrink-0", isAddition ? "text-green-600" : "text-red-600")}>
+                        {isAddition ? <ArrowUpCircle className="w-3.5 h-3.5" /> : <ArrowDownCircle className="w-3.5 h-3.5" />}
+                        {isAddition ? '+' : '-'}{entry.quantity}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge className={cn("text-[10px] border-0", isAddition ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
+                        {REASON_LABELS[entry.reason]}
+                      </Badge>
+                      <span className="text-[10px] text-muted-foreground">Antes {entry.balanceBefore} → Después {entry.balanceAfter}</span>
+                    </div>
+                    <div className="flex justify-between text-[10px] text-muted-foreground pt-1">
+                      <span>{sellerName}</span>
+                      <span>{format(new Date(entry.createdAt), 'dd/MM/yy HH:mm', { locale: es })}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            </>
           )}
         </CardContent>
 

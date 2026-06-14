@@ -60,14 +60,14 @@ export default function InsightsPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold font-headline flex items-center gap-2">
             <Sparkles className="text-accent" /> AI Sales Insights
           </h1>
           <p className="text-muted-foreground text-sm">Análisis estratégico basado en tus datos de ventas reales</p>
         </div>
-        <Button onClick={handleGenerateInsights} disabled={loading} className="gap-2">
+        <Button onClick={handleGenerateInsights} disabled={loading} className="gap-2 w-full sm:w-auto">
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <TrendingUp className="w-4 h-4" />}
           Generar Análisis
         </Button>

@@ -400,6 +400,7 @@ export default function SellerSettlementsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
+            <div className="hidden md:block">
             <Table>
               <TableHeader className="bg-muted/30">
                 <TableRow>
@@ -424,6 +425,24 @@ export default function SellerSettlementsPage() {
                 ))}
               </TableBody>
             </Table>
+            </div>
+            <div className="md:hidden divide-y">
+              {citySummary.map((row, i) => (
+                <div key={i} className="p-4 space-y-1.5">
+                  <div className="flex justify-between items-start gap-2">
+                    <div>
+                      <p className="text-sm font-bold">{row.city}</p>
+                      <p className="text-[10px] text-muted-foreground">{row.delivery}</p>
+                    </div>
+                    <Badge variant="secondary" className="font-bold text-xs shrink-0">{row.count} ventas</Badge>
+                  </div>
+                  <div className="flex justify-between text-xs pt-1 border-t">
+                    <span className="text-primary font-black">${row.totalVenta.toLocaleString()}</span>
+                    <span className="text-orange-600 font-bold">Com: ${row.totalComision.toLocaleString()}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
       )}
@@ -444,6 +463,8 @@ export default function SellerSettlementsPage() {
               <p className="text-sm text-muted-foreground italic">Sin pedidos en este período</p>
             </div>
           ) : (
+            <>
+            <div className="hidden md:block">
             <Table>
               <TableHeader className="bg-muted/30">
                 <TableRow>
@@ -508,6 +529,41 @@ export default function SellerSettlementsPage() {
                 })}
               </TableBody>
             </Table>
+            </div>
+            <div className="md:hidden divide-y">
+              {sortedSales.map(sale => {
+                const deliveryName = sale.deliveryPersonId
+                  ? (users.find(u => u.id === sale.deliveryPersonId)?.name ?? 'Repartidor')
+                  : 'Sin asignar';
+                return (
+                  <div key={sale.id} className="p-4 space-y-2">
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="min-w-0">
+                        <p className="font-bold text-sm truncate">{sale.customerName || 'Cliente'}</p>
+                        <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                          <MapPin className="w-3 h-3" /> {sale.city || '—'} · {new Date(sale.createdAt).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })}
+                        </div>
+                      </div>
+                      <StatusBadge status={sale.status} failureReason={sale.failureReason} />
+                    </div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {sale.items.map((item, idx) => {
+                        const p = products.find(prod => prod.id === item.productId);
+                        return <span key={idx}>{p?.name || 'Producto'} ×{item.quantity}{idx < sale.items.length - 1 ? ', ' : ''}</span>;
+                      })}
+                    </div>
+                    <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                      <Truck className="w-3 h-3 shrink-0" /> {deliveryName}
+                    </div>
+                    <div className="flex justify-between text-xs pt-1 border-t">
+                      <span className="text-primary font-black">${sale.totalVenta.toLocaleString()}</span>
+                      <span className="text-orange-600 font-bold">Com: ${sale.totalComision.toLocaleString()}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            </>
           )}
         </CardContent>
       </Card>

@@ -367,7 +367,7 @@ export default function DeliveryPage() {
                   return (
                     <div key={step.key} className="flex flex-col items-center gap-2 w-1/4">
                       <div className={cn(
-                        "w-12 h-12 rounded-full flex items-center justify-center border-4 transition-all duration-500",
+                        "w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center border-4 transition-all duration-500",
                         isFailed && idx === trackingStep
                           ? "bg-red-500 border-red-500 text-white"
                           : isPast
@@ -408,7 +408,7 @@ export default function DeliveryPage() {
           if (!next) return null;
           const isLastStep = next.nextStatus === 'delivered';
           return (
-            <div className="flex gap-3">
+            <div className="flex flex-col sm:flex-row gap-3">
               <Button
                 className={cn(
                   "flex-1 h-14 text-base font-black rounded-2xl gap-2 shadow-xl",
@@ -422,7 +422,7 @@ export default function DeliveryPage() {
               <DialogTrigger asChild>
                 <Button
                   variant="outline"
-                  className="h-14 px-6 rounded-2xl border-destructive text-destructive hover:bg-destructive/10 font-bold gap-2"
+                  className="h-14 px-6 rounded-2xl border-destructive text-destructive hover:bg-destructive/10 font-bold gap-2 w-full sm:w-auto"
                 >
                   <XCircle className="w-5 h-5" /> Reportar Fallo
                 </Button>
@@ -650,7 +650,7 @@ export default function DeliveryPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-5 pt-3">
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-3 gap-3 md:gap-4 [&_p.text-3xl]:text-lg [&_p.text-3xl]:sm:text-3xl">
                 <div className="flex flex-col gap-1">
                   <div className="flex items-center gap-1.5 text-muted-foreground">
                     <Truck className="w-3.5 h-3.5" />
@@ -795,7 +795,7 @@ export default function DeliveryPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-5 pt-3">
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-3 gap-3 md:gap-4 [&_p.text-3xl]:text-lg [&_p.text-3xl]:sm:text-3xl">
                 <div className="flex flex-col gap-1">
                   <div className="flex items-center gap-1.5 text-muted-foreground">
                     <Wallet className="w-3.5 h-3.5" />
